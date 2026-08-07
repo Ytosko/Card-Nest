@@ -279,6 +279,7 @@ export type Database = {
           address_line_2: string | null
           city: string | null
           company: string | null
+          contact_photo_path: string | null
           country: string | null
           created_at: string
           department: string | null
@@ -315,6 +316,7 @@ export type Database = {
           address_line_2?: string | null
           city?: string | null
           company?: string | null
+          contact_photo_path?: string | null
           country?: string | null
           created_at?: string
           department?: string | null
@@ -343,7 +345,7 @@ export type Database = {
           state_region?: string | null
           status?: string
           updated_at?: string
-          user_id: string
+          user_id?: string
           website?: string | null
         }
         Update: {
@@ -351,6 +353,7 @@ export type Database = {
           address_line_2?: string | null
           city?: string | null
           company?: string | null
+          contact_photo_path?: string | null
           country?: string | null
           created_at?: string
           department?: string | null

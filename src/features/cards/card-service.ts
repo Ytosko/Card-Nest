@@ -1,3 +1,6 @@
+import { File } from 'expo-file-system';
+import * as ImageManipulator from 'expo-image-manipulator';
+
 import { supabase } from '@/src/lib/supabase/client';
 import type { Card, Tables, TablesUpdate } from '@/src/types/database.helpers';
 
@@ -40,7 +43,7 @@ function cardValues(draft: CardDraft) {
   };
 }
 
-export async function listCards(limit = 50) {
+export async function listCards(limit = 100) {
   const { data, error } = await supabase
     .from('cards')
     .select('*')
@@ -52,9 +55,12 @@ export async function listCards(limit = 50) {
 }
 
 export async function searchCards(query: string) {
+  if (!query.trim()) {
+    return listCards(100);
+  }
   const { data, error } = await supabase.rpc('search_cards', {
-    search_query: query,
-    page_size: 60,
+    search_query: query.trim(),
+    page_size: 100,
     page_offset: 0,
   });
   if (error) throw error;
@@ -107,17 +113,19 @@ async function syncPrimaryRelations(cardId: string, userId: string, draft: CardD
   if (draft.phone) inserts.push(supabase.from('card_phone_numbers').insert({ user_id: userId, card_id: cardId, phone_number: draft.phone, is_primary: true }));
   if (draft.website) inserts.push(supabase.from('card_websites').insert({ user_id: userId, card_id: cardId, url: draft.website, is_primary: true }));
   if (draft.addressLine1 || draft.addressLine2 || draft.city || draft.stateRegion || draft.postalCode || draft.country) {
-    inserts.push(supabase.from('card_addresses').insert({
-      user_id: userId,
-      card_id: cardId,
-      is_primary: true,
-      address_line_1: clean(draft.addressLine1),
-      address_line_2: clean(draft.addressLine2),
-      city: clean(draft.city),
-      state_region: clean(draft.stateRegion),
-      postal_code: clean(draft.postalCode),
-      country: clean(draft.country),
-    }));
+    inserts.push(
+      supabase.from('card_addresses').insert({
+        user_id: userId,
+        card_id: cardId,
+        is_primary: true,
+        address_line_1: clean(draft.addressLine1),
+        address_line_2: clean(draft.addressLine2),
+        city: clean(draft.city),
+        state_region: clean(draft.stateRegion),
+        postal_code: clean(draft.postalCode),
+        country: clean(draft.country),
+      })
+    );
   }
   const results = await Promise.all(inserts);
   const insertionError = results.find((result) => result.error)?.error;
@@ -129,14 +137,60 @@ export async function toggleFavorite(cardId: string, isFavorite: boolean) {
   if (error) throw error;
 }
 
-export async function deleteCard(card: CardWithRelations) {
-  const paths = card.card_images.map((image) => image.storage_path);
-  if (paths.length) {
-    const { error: storageError } = await supabase.storage.from('card-images').remove(paths);
-    if (storageError) throw storageError;
+export async function deleteCard(card: CardWithRelations | Card) {
+  // Clean up contact photo if present
+  if (card.contact_photo_path) {
+    await supabase.storage.from('contact-photos').remove([card.contact_photo_path]).catch(() => undefined);
   }
+
+  // Clean up business card images if present
+  if ('card_images' in card && Array.isArray(card.card_images) && card.card_images.length) {
+    const paths = card.card_images.map((image) => image.storage_path);
+    if (paths.length) {
+      await supabase.storage.from('card-images').remove(paths).catch(() => undefined);
+    }
+  }
+
   const { error } = await supabase.from('cards').delete().eq('id', card.id);
   if (error) throw error;
+}
+
+export async function uploadContactPhoto(cardId: string, userId: string, uri: string): Promise<string> {
+  const resized = await ImageManipulator.manipulateAsync(
+    uri,
+    [{ resize: { width: 512, height: 512 } }],
+    { compress: 0.82, format: ImageManipulator.SaveFormat.JPEG }
+  );
+  const path = `${userId}/${cardId}/photo.jpg`;
+  const file = new File(resized.uri);
+  const { error: uploadError } = await supabase.storage
+    .from('contact-photos')
+    .upload(path, await file.arrayBuffer(), { contentType: 'image/jpeg', upsert: true });
+
+  if (uploadError) throw uploadError;
+
+  const { error: updateError } = await supabase
+    .from('cards')
+    .update({ contact_photo_path: path })
+    .eq('id', cardId);
+
+  if (updateError) throw updateError;
+
+  const { data: signed } = await supabase.storage.from('contact-photos').createSignedUrl(path, 3600);
+  return signed?.signedUrl ?? '';
+}
+
+export async function removeContactPhoto(cardId: string, photoPath: string): Promise<void> {
+  await supabase.storage.from('contact-photos').remove([photoPath]).catch(() => undefined);
+  const { error } = await supabase.from('cards').update({ contact_photo_path: null }).eq('id', cardId);
+  if (error) throw error;
+}
+
+export async function getSignedContactPhotoUrl(photoPath?: string | null): Promise<string | null> {
+  if (!photoPath) return null;
+  const { data, error } = await supabase.storage.from('contact-photos').createSignedUrl(photoPath, 3600);
+  if (error) return null;
+  return data.signedUrl;
 }
 
 export async function getSignedCardImageUrls(card: CardWithRelations) {
@@ -145,13 +199,16 @@ export async function getSignedCardImageUrls(card: CardWithRelations) {
       const { data, error } = await supabase.storage.from('card-images').createSignedUrl(image.storage_path, 3_600);
       if (error) throw error;
       return [image.side, data.signedUrl] as const;
-    }),
+    })
   );
   return Object.fromEntries(entries) as Partial<Record<'front' | 'back', string>>;
 }
 
 export async function markCardExported(cardId: string) {
-  const { error } = await supabase.from('cards').update({ last_exported_to_contacts_at: new Date().toISOString() }).eq('id', cardId);
+  const { error } = await supabase
+    .from('cards')
+    .update({ last_exported_to_contacts_at: new Date().toISOString() })
+    .eq('id', cardId);
   if (error) throw error;
 }
 
@@ -164,16 +221,36 @@ export async function mergeDuplicateCard(candidate: CardWithRelations) {
   if (!candidate.duplicate_of_id) throw new Error('No duplicate target is available.');
   const existing = await getCard(candidate.duplicate_of_id);
   const mergeFields = [
-    'display_name', 'first_name', 'middle_name', 'last_name', 'company', 'job_title', 'department',
-    'primary_email', 'primary_phone', 'website', 'address_line_1', 'address_line_2', 'city',
-    'state_region', 'postal_code', 'country', 'notes',
+    'display_name',
+    'first_name',
+    'middle_name',
+    'last_name',
+    'company',
+    'job_title',
+    'department',
+    'primary_email',
+    'primary_phone',
+    'website',
+    'address_line_1',
+    'address_line_2',
+    'city',
+    'state_region',
+    'postal_code',
+    'country',
+    'notes',
   ] as const;
-  const updates = Object.fromEntries(mergeFields.map((field) => [field, existing[field] || candidate[field]])) as TablesUpdate<'cards'>;
+  const updates = Object.fromEntries(
+    mergeFields.map((field) => [field, existing[field] || candidate[field]])
+  ) as TablesUpdate<'cards'>;
   const { error: updateError } = await supabase.from('cards').update(updates).eq('id', existing.id);
   if (updateError) throw updateError;
-  const tagRows = candidate.card_tags.flatMap((relation) => relation.tags ? [{ user_id: candidate.user_id, card_id: existing.id, tag_id: relation.tags.id }] : []);
+  const tagRows = candidate.card_tags.flatMap((relation) =>
+    relation.tags ? [{ user_id: candidate.user_id, card_id: existing.id, tag_id: relation.tags.id }] : []
+  );
   if (tagRows.length) {
-    const { error: tagError } = await supabase.from('card_tags').upsert(tagRows, { onConflict: 'card_id,tag_id', ignoreDuplicates: true });
+    const { error: tagError } = await supabase
+      .from('card_tags')
+      .upsert(tagRows, { onConflict: 'card_id,tag_id', ignoreDuplicates: true });
     if (tagError) throw tagError;
   }
   await deleteCard(candidate);
@@ -187,7 +264,11 @@ export async function listTags() {
 }
 
 export async function createTag(userId: string, name: string) {
-  const { data, error } = await supabase.from('tags').insert({ user_id: userId, name: name.trim(), color: '#0CC0DF' }).select('*').single();
+  const { data, error } = await supabase
+    .from('tags')
+    .insert({ user_id: userId, name: name.trim(), color: '#0CC0DF' })
+    .select('*')
+    .single();
   if (error) throw error;
   return data;
 }

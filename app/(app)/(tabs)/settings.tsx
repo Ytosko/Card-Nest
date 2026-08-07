@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppText } from '@/src/components/ui/app-text';
 import { ScreenHeader } from '@/src/components/ui/screen-header';
+import { UserAvatar } from '@/src/components/ui/user-avatar';
 import { useAuth } from '@/src/features/auth/auth-provider';
 import { useAppTheme } from '@/src/theme/theme-provider';
 
@@ -12,7 +13,6 @@ export default function SettingsScreen() {
   const theme = useAppTheme();
   const router = useRouter();
   const { profile, user } = useAuth();
-  const initials = (profile?.display_name || user?.email || '?').split(/[\s@]+/u).slice(0, 2).map((value) => value[0]?.toUpperCase()).join('');
 
   return (
     <SafeAreaView edges={['top']} style={[styles.safeArea, { backgroundColor: theme.colors.background }]}>
@@ -22,11 +22,22 @@ export default function SettingsScreen() {
           accessibilityHint="Opens your profile"
           accessibilityRole="button"
           onPress={() => router.push('/(app)/profile')}
-          style={({ pressed }) => [styles.profile, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, borderRadius: theme.radii.lg, opacity: pressed ? 0.7 : 1, padding: theme.spacing[4] }]}>
-          <View style={[styles.avatar, { backgroundColor: theme.colors.primarySoft }]}><AppText variant="title" style={{ color: theme.colors.primary }}>{initials}</AppText></View>
+          style={({ pressed }) => [
+            styles.profile,
+            {
+              backgroundColor: theme.colors.surface,
+              borderColor: theme.colors.border,
+              borderRadius: theme.radii.lg,
+              opacity: pressed ? 0.7 : 1,
+              padding: theme.spacing[4],
+            },
+          ]}>
+          <UserAvatar avatarPath={profile?.avatar_path} displayName={profile?.display_name} email={user?.email} size={54} />
           <View style={styles.profileCopy}>
             <AppText variant="bodyStrong">{profile?.display_name || 'Complete your profile'}</AppText>
-            <AppText muted numberOfLines={1} variant="caption">{user?.email}</AppText>
+            <AppText muted numberOfLines={1} variant="caption">
+              {user?.email}
+            </AppText>
           </View>
           <MaterialCommunityIcons color={theme.colors.textMuted} name="chevron-right" size={24} />
         </Pressable>
@@ -48,23 +59,47 @@ export default function SettingsScreen() {
 
 function SettingsGroup({ title, children }: { title: string; children: React.ReactNode }) {
   const theme = useAppTheme();
-  return <View style={{ gap: theme.spacing[2] }}><AppText muted variant="label">{title}</AppText><View style={[styles.group, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, borderRadius: theme.radii.lg }]}>{children}</View></View>;
+  return (
+    <View style={{ gap: theme.spacing[2] }}>
+      <AppText muted variant="label">
+        {title}
+      </AppText>
+      <View style={[styles.group, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, borderRadius: theme.radii.lg }]}>
+        {children}
+      </View>
+    </View>
+  );
 }
 
-function SettingsRow({ icon, label, value, onPress }: { icon: keyof typeof MaterialCommunityIcons.glyphMap; label: string; value?: string; onPress: () => void }) {
+function SettingsRow({
+  icon,
+  label,
+  value,
+  onPress,
+}: {
+  icon: keyof typeof MaterialCommunityIcons.glyphMap;
+  label: string;
+  value?: string;
+  onPress: () => void;
+}) {
   const theme = useAppTheme();
   return (
     <Pressable accessibilityRole="button" onPress={onPress} style={({ pressed }) => [styles.row, { borderBottomColor: theme.colors.border, opacity: pressed ? 0.65 : 1 }]}>
       <MaterialCommunityIcons color={theme.colors.primary} name={icon} size={22} />
-      <AppText variant="bodyStrong" style={styles.rowLabel}>{label}</AppText>
-      {value ? <AppText muted numberOfLines={1} variant="caption">{value}</AppText> : null}
+      <AppText variant="bodyStrong" style={styles.rowLabel}>
+        {label}
+      </AppText>
+      {value ? (
+        <AppText muted numberOfLines={1} variant="caption">
+          {value}
+        </AppText>
+      ) : null}
       <MaterialCommunityIcons color={theme.colors.textMuted} name="chevron-right" size={21} />
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  avatar: { alignItems: 'center', borderRadius: 20, height: 58, justifyContent: 'center', width: 58 },
   content: { alignSelf: 'center', maxWidth: 760, paddingBottom: 36, width: '100%' },
   group: { borderWidth: 1, overflow: 'hidden' },
   profile: { alignItems: 'center', borderWidth: 1, flexDirection: 'row', gap: 14 },

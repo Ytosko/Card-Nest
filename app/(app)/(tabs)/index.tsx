@@ -22,15 +22,17 @@ export default function DashboardScreen() {
   const queue = useCaptureQueue();
 
   const firstName = profile?.display_name?.trim().split(/\s+/u)[0];
-  const ready = cards.data?.filter((card) => card.status === 'ready').length ?? 0;
-  const favorites = cards.data?.filter((card) => card.is_favorite).length ?? 0;
+  const allCards = cards.data ?? [];
+  const readyCards = allCards.filter((c) => c.status === 'ready');
+  const hasContacts = readyCards.length > 0;
+  const recentContacts = readyCards.slice(0, 5);
+
   const pendingQueue = queue.items.filter((item) => item.state !== 'synced');
-  const pendingCards = cards.data?.filter((card) => ['capture_pending', 'uploading', 'processing', 'review'].includes(card.status)).length ?? 0;
 
   return (
     <SafeAreaView edges={['top']} style={[styles.safeArea, { backgroundColor: theme.colors.background }]}>
       <ScrollView
-        contentContainerStyle={[styles.content, { gap: theme.spacing[5], padding: theme.spacing[5] }]}
+        contentContainerStyle={[styles.content, { gap: theme.spacing[4], padding: theme.spacing[5] }]}
         refreshControl={<RefreshControl refreshing={cards.isRefetching} onRefresh={() => void cards.refetch()} tintColor={theme.colors.primary} />}>
         {/* Top Header */}
         <View style={styles.topBar}>
@@ -42,7 +44,7 @@ export default function DashboardScreen() {
 
         {params.confirmed === 'true' ? <AuthNotice message="Email confirmed. Your Card Nest is ready." tone="success" /> : null}
 
-        {/* Sync / Offline Banner */}
+        {/* Sync / Offline Banner — Only shown when active sync, offline, or retry required */}
         {pendingQueue.length > 0 ? (
           <Pressable
             accessibilityLabel="View sync queue status"
@@ -51,186 +53,153 @@ export default function DashboardScreen() {
             <MaterialCommunityIcons color={theme.colors.primary} name="cloud-sync-outline" size={20} />
             <View style={{ flex: 1 }}>
               <AppText variant="label" style={{ color: theme.colors.primary }}>
-                Syncing {pendingQueue.length} {pendingQueue.length === 1 ? 'card' : 'cards'} in background
+                Syncing {pendingQueue.length} {pendingQueue.length === 1 ? 'contact' : 'contacts'} in background
               </AppText>
-              <AppText muted variant="caption">Tap to view queue status</AppText>
+              <AppText muted variant="caption">
+                Tap to view queue status
+              </AppText>
             </View>
             <MaterialCommunityIcons color={theme.colors.primary} name="chevron-right" size={20} />
           </Pressable>
         ) : null}
 
-        {/* Welcome Header */}
+        {/* Header Greeting */}
         <View style={{ gap: theme.spacing[1] }}>
-          <AppText variant="label" style={{ color: theme.colors.primary }}>YOUR CONTACT WORKSPACE</AppText>
-          <AppText accessibilityRole="header" variant="display">{firstName ? `Good to see you, ${firstName}.` : 'Make every introduction count.'}</AppText>
-          <AppText muted>Scan, organize, and find the contacts behind your business cards.</AppText>
+          <AppText variant="label" style={{ color: theme.colors.primary }}>
+            BUSINESS CONTACT LIBRARY
+          </AppText>
+          <AppText accessibilityRole="header" variant="display">
+            {firstName ? `Welcome back, ${firstName}.` : 'Your Business Contacts'}
+          </AppText>
         </View>
 
-        {/* Quick Search Shortcut */}
+        {/* Prominent Search Field */}
         <Pressable
-          accessibilityLabel="Search cards"
+          accessibilityLabel="Search contacts"
           onPress={() => router.push('/(app)/(tabs)/search')}
-          style={[styles.searchShortcut, { backgroundColor: theme.colors.surface, borderColor: theme.colors.borderStrong }]}>
-          <MaterialCommunityIcons color={theme.colors.textMuted} name="magnify" size={22} />
-          <AppText muted style={{ flex: 1 }}>Search names, companies, titles, tags…</AppText>
+          style={[styles.searchBar, { backgroundColor: theme.colors.surface, borderColor: theme.colors.borderStrong }]}>
+          <MaterialCommunityIcons color={theme.colors.primary} name="magnify" size={22} />
+          <AppText muted style={{ flex: 1 }}>
+            Search name, company, title, email, phone...
+          </AppText>
         </Pressable>
 
-        {/* Dashboard Stats */}
-        <View style={styles.stats}>
-          <Stat icon="card-account-details-outline" label="Saved" value={ready} />
-          <Stat icon="star-outline" label="Favorites" value={favorites} />
-          <Stat icon="progress-clock" label="In progress" value={pendingCards + pendingQueue.length} />
-        </View>
-
-        {/* Shortcuts Bar */}
+        {/* Useful Shortcuts */}
         <View style={styles.shortcutsRow}>
-          <ShortcutChip icon="cards-outline" label="All Cards" onPress={() => router.push('/(app)/(tabs)/cards')} />
+          <ShortcutChip icon="account-group-outline" label="All Contacts" onPress={() => router.push('/(app)/(tabs)/cards')} />
           <ShortcutChip icon="star-outline" label="Favorites" onPress={() => router.push({ pathname: '/(app)/(tabs)/cards', params: { filter: 'favorites' } })} />
-          <ShortcutChip icon="alert-circle-outline" label="Review" onPress={() => router.push({ pathname: '/(app)/(tabs)/cards', params: { filter: 'review' } })} />
-          <ShortcutChip icon="cog-outline" label="Settings" onPress={() => router.push('/(app)/(tabs)/settings')} />
+          <ShortcutChip icon="line-scan" label="Scan Card" onPress={() => router.push('/(app)/(tabs)/scan')} />
         </View>
 
-        {/* Hero Scan Banner */}
-        <View style={[styles.feature, { backgroundColor: theme.colors.surfaceBrand, borderRadius: theme.radii.xl, padding: theme.spacing[5] }]}>
-          <View style={styles.featureIcon}><MaterialCommunityIcons color={theme.colors.textOnBrand} name="line-scan" size={32} /></View>
-          <View style={styles.featureCopy}>
-            <AppText variant="title" style={{ color: theme.colors.textOnBrand }}>Add a new business card</AppText>
-            <AppText style={{ color: theme.colors.textOnBrand, opacity: 0.9 }}>Photograph the front and back or enter details manually. Your records stay encrypted and private.</AppText>
-            <View style={styles.featureActions}>
-              <AppButton onPress={() => router.push('/(app)/(tabs)/scan')} variant="primary">
-                Scan now
-              </AppButton>
-              <AppButton onPress={() => router.push('/(app)/cards/new')} variant="secondary" style={{ backgroundColor: theme.colors.surface, borderColor: theme.colors.border }}>
-                Manual entry
-              </AppButton>
+        {/* Populated State: Recent Contacts List */}
+        {hasContacts ? (
+          <View style={{ gap: theme.spacing[3] }}>
+            <View style={styles.sectionHeader}>
+              <AppText variant="title">Recent Contacts</AppText>
+              <Pressable accessibilityLabel="See all contacts" onPress={() => router.push('/(app)/(tabs)/cards')}>
+                <AppText variant="label" style={{ color: theme.colors.primary }}>
+                  See all ({readyCards.length})
+                </AppText>
+              </Pressable>
             </View>
+
+            {cards.isLoading ? <ActivityIndicator color={theme.colors.primary} /> : null}
+            {recentContacts.map((card) => (
+              <CardListRow
+                card={card}
+                key={card.id}
+                onPress={() => router.push({ pathname: '/(app)/cards/[id]', params: { id: card.id } })}
+              />
+            ))}
           </View>
-        </View>
+        ) : null}
 
-        {/* Recently Updated / Zero-Card State */}
-        <View style={{ gap: theme.spacing[3] }}>
-          <View style={styles.sectionTitle}>
-            <AppText variant="title">Recently updated</AppText>
-            {cards.data?.length ? <AppText onPress={() => router.push('/(app)/(tabs)/cards')} style={{ color: theme.colors.primary }} variant="label">See all</AppText> : null}
-          </View>
-          {cards.isLoading ? <ActivityIndicator color={theme.colors.primary} /> : null}
-          {cards.isError ? <AppText style={{ color: theme.colors.danger }}>Your cards could not be loaded. Pull down to try again.</AppText> : null}
-          {cards.data?.slice(0, 4).map((card) => <CardListRow card={card} key={card.id} onPress={() => router.push({ pathname: '/(app)/cards/[id]', params: { id: card.id } })} />)}
-
-          {/* Zero-Card Onboarding Cards */}
-          {!cards.isLoading && !cards.data?.length ? (
-            <View style={[styles.emptyContainer, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, borderRadius: theme.radii.lg, padding: theme.spacing[5] }]}>
-              <AppText variant="title">How Card Nest works</AppText>
-              <AppText muted>Follow these simple steps to build your cloud contact library:</AppText>
-              
-              <View style={styles.stepList}>
-                <View style={styles.stepItem}>
-                  <View style={[styles.stepBadge, { backgroundColor: theme.colors.primarySoft }]}>
-                    <AppText variant="label" style={{ color: theme.colors.primary }}>1</AppText>
-                  </View>
-                  <View style={{ flex: 1, gap: 2 }}>
-                    <AppText variant="bodyStrong">Snap front & back</AppText>
-                    <AppText muted variant="caption">Use your camera or select card photos from gallery. Works offline.</AppText>
-                  </View>
-                </View>
-
-                <View style={styles.stepItem}>
-                  <View style={[styles.stepBadge, { backgroundColor: theme.colors.primarySoft }]}>
-                    <AppText variant="label" style={{ color: theme.colors.primary }}>2</AppText>
-                  </View>
-                  <View style={{ flex: 1, gap: 2 }}>
-                    <AppText variant="bodyStrong">AI extracts details</AppText>
-                    <AppText muted variant="caption">OpenAI or Gemini parses contact fields using your private API key.</AppText>
-                  </View>
-                </View>
-
-                <View style={styles.stepItem}>
-                  <View style={[styles.stepBadge, { backgroundColor: theme.colors.primarySoft }]}>
-                    <AppText variant="label" style={{ color: theme.colors.primary }}>3</AppText>
-                  </View>
-                  <View style={{ flex: 1, gap: 2 }}>
-                    <AppText variant="bodyStrong">Review & save</AppText>
-                    <AppText muted variant="caption">Edit any field, handle duplicates, and sync securely to your cloud library.</AppText>
-                  </View>
-                </View>
-              </View>
-
-              <AppButton onPress={() => router.push('/(app)/(tabs)/scan')} style={{ marginTop: theme.spacing[2] }}>
-                Scan your first card
-              </AppButton>
+        {/* Zero Contacts State: Simple Onboarding */}
+        {!cards.isLoading && !hasContacts ? (
+          <View style={[styles.emptyBox, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, borderRadius: theme.radii.lg, padding: theme.spacing[5] }]}>
+            <View style={[styles.emptyIconWrap, { backgroundColor: theme.colors.primarySoft }]}>
+              <MaterialCommunityIcons color={theme.colors.primary} name="card-account-details-outline" size={36} />
             </View>
-          ) : null}
-        </View>
+            <AppText variant="title" style={{ textAlign: 'center' }}>
+              No contacts saved yet
+            </AppText>
+            <AppText muted style={{ textAlign: 'center' }}>
+              Scan your first business card to automatically extract contact details with AI and build your private cloud contact library.
+            </AppText>
+            <AppButton onPress={() => router.push('/(app)/(tabs)/scan')} style={{ marginTop: theme.spacing[2], width: '100%' }}>
+              Scan your first card
+            </AppButton>
+          </View>
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-function Stat({ icon, label, value }: { icon: keyof typeof MaterialCommunityIcons.glyphMap; label: string; value: number }) {
-  const theme = useAppTheme();
-  return (
-    <View style={[styles.stat, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, borderRadius: theme.radii.lg, padding: theme.spacing[3] }]}>
-      <MaterialCommunityIcons color={theme.colors.primary} name={icon} size={22} />
-      <AppText variant="title">{value}</AppText>
-      <AppText muted variant="caption">{label}</AppText>
-    </View>
-  );
-}
-
-function ShortcutChip({ icon, label, onPress }: { icon: keyof typeof MaterialCommunityIcons.glyphMap; label: string; onPress: () => void }) {
+function ShortcutChip({
+  icon,
+  label,
+  onPress,
+}: {
+  icon: keyof typeof MaterialCommunityIcons.glyphMap;
+  label: string;
+  onPress: () => void;
+}) {
   const theme = useAppTheme();
   return (
     <Pressable
       accessibilityRole="button"
       onPress={onPress}
-      style={[styles.shortcutChip, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
-      <MaterialCommunityIcons color={theme.colors.primary} name={icon} size={16} />
-      <AppText variant="caption" style={{ color: theme.colors.text }}>{label}</AppText>
+      style={({ pressed }) => [
+        styles.shortcutChip,
+        {
+          backgroundColor: theme.colors.surface,
+          borderColor: theme.colors.border,
+          opacity: pressed ? 0.7 : 1,
+        },
+      ]}>
+      <MaterialCommunityIcons color={theme.colors.primary} name={icon} size={18} />
+      <AppText variant="bodyStrong" style={{ color: theme.colors.text }}>
+        {label}
+      </AppText>
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
   content: { alignSelf: 'center', maxWidth: 760, paddingBottom: 36, width: '100%' },
-  emptyContainer: { borderWidth: 1, gap: 14 },
-  feature: { alignItems: 'flex-start', flexDirection: 'row', gap: 16 },
-  featureActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 8 },
-  featureCopy: { flex: 1, gap: 6 },
-  featureIcon: { alignItems: 'center', height: 48, justifyContent: 'center', width: 48 },
-  safeArea: { flex: 1 },
-  scanButton: { minHeight: 44, paddingHorizontal: 15 },
-  searchShortcut: {
+  emptyBox: { alignItems: 'center', borderWidth: 1, gap: 14, marginTop: 8 },
+  emptyIconWrap: {
     alignItems: 'center',
-    borderRadius: 12,
+    borderRadius: 999,
+    height: 64,
+    justifyContent: 'center',
+    width: 64,
+  },
+  safeArea: { flex: 1 },
+  scanButton: { minHeight: 40, paddingHorizontal: 16 },
+  searchBar: {
+    alignItems: 'center',
+    borderRadius: 14,
     borderWidth: 1,
     flexDirection: 'row',
-    gap: 10,
-    minHeight: 48,
-    paddingHorizontal: 14,
+    gap: 12,
+    minHeight: 52,
+    paddingHorizontal: 16,
   },
-  sectionTitle: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
+  sectionHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 },
   shortcutChip: {
     alignItems: 'center',
     borderRadius: 999,
     borderWidth: 1,
+    flex: 1,
     flexDirection: 'row',
-    gap: 6,
-    minHeight: 36,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  shortcutsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  stat: { borderWidth: 1, flex: 1, gap: 2, minWidth: 92 },
-  stats: { flexDirection: 'row', gap: 10 },
-  stepBadge: {
-    alignItems: 'center',
-    borderRadius: 14,
-    height: 28,
+    gap: 8,
     justifyContent: 'center',
-    width: 28,
+    minHeight: 44,
+    paddingHorizontal: 14,
   },
-  stepItem: { alignItems: 'flex-start', flexDirection: 'row', gap: 12 },
-  stepList: { gap: 14, marginVertical: 4 },
+  shortcutsRow: { flexDirection: 'row', gap: 10 },
   syncBanner: {
     alignItems: 'center',
     borderRadius: 12,
@@ -241,4 +210,3 @@ const styles = StyleSheet.create({
   },
   topBar: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
 });
-

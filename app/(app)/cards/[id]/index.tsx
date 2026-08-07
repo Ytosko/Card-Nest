@@ -3,56 +3,170 @@ import * as Clipboard from 'expo-clipboard';
 import { Image } from 'expo-image';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Linking,
+  Modal,
+  Pressable,
+  ScrollView,
+  Share,
+  StyleSheet,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { AppButton } from '@/src/components/ui/app-button';
 import { AppText } from '@/src/components/ui/app-text';
+import { ContactAvatar } from '@/src/components/ui/contact-avatar';
 import { AuthNotice } from '@/src/features/auth/components/auth-notice';
-import { useCard, useToggleFavorite, cardKeys } from '@/src/features/cards/card-hooks';
-import { deleteCard, getSignedCardImageUrls, keepCardSeparate, markCardExported, mergeDuplicateCard } from '@/src/features/cards/card-service';
-import { exportCardToContacts } from '@/src/features/contacts/contact-export';
+import { useCard, cardKeys } from '@/src/features/cards/card-hooks';
+import {
+  deleteCard,
+  getSignedCardImageUrls,
+  keepCardSeparate,
+  markCardExported,
+  mergeDuplicateCard,
+  toggleFavorite,
+} from '@/src/features/cards/card-service';
+import { checkNativeContactMatch, exportCardToContacts } from '@/src/features/contacts/contact-export';
 import { CardTagsEditor } from '@/src/features/cards/components/card-tags-editor';
 import { useAppTheme } from '@/src/theme/theme-provider';
 
 export default function CardDetailScreen() {
   const { id = '' } = useLocalSearchParams<{ id: string }>();
-  const theme = useAppTheme(); const router = useRouter(); const client = useQueryClient();
-  const card = useCard(id); const favorite = useToggleFavorite();
-  const [images, setImages] = useState<Partial<Record<'front' | 'back', string>>>({});
-  const [notice, setNotice] = useState<string | null>(null); const [error, setError] = useState<string | null>(null); const [busy, setBusy] = useState(false);
+  const theme = useAppTheme();
+  const router = useRouter();
+  const client = useQueryClient();
 
-  useEffect(() => { if (card.data?.card_images.length) void getSignedCardImageUrls(card.data).then(setImages).catch(() => undefined); }, [card.data]);
-  if (card.isLoading) return <View style={[styles.center, { backgroundColor: theme.colors.background }]}><ActivityIndicator color={theme.colors.primary} /></View>;
-  if (!card.data) return <View style={[styles.center, { backgroundColor: theme.colors.background, padding: 24 }]}><AppText>This card could not be found.</AppText><AppButton onPress={() => router.replace('/(app)/(tabs)/cards')}>Back to cards</AppButton></View>;
+  const card = useCard(id);
+  const [images, setImages] = useState<Partial<Record<'front' | 'back', string>>>({});
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [inNativeContacts, setInNativeContacts] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
   const person = card.data;
 
+  // Resolve business card signed image URLs
+  useEffect(() => {
+    if (person?.card_images?.length) {
+      void getSignedCardImageUrls(person).then(setImages).catch(() => undefined);
+    }
+  }, [person]);
+
+  // Check native device contacts match
+  useEffect(() => {
+    if (person) {
+      void checkNativeContactMatch(person).then((res) => {
+        if (res.isMatched || Boolean(person.last_exported_to_contacts_at)) {
+          setInNativeContacts(true);
+        }
+      });
+    }
+  }, [person]);
+
+  if (card.isLoading) {
+    return (
+      <View style={[styles.center, { backgroundColor: theme.colors.background }]}>
+        <ActivityIndicator color={theme.colors.primary} />
+      </View>
+    );
+  }
+
+  if (!person) {
+    return (
+      <View style={[styles.center, { backgroundColor: theme.colors.background, padding: 24 }]}>
+        <AppText variant="title">Contact not found</AppText>
+        <AppText muted>This contact may have been deleted or moved.</AppText>
+        <AppButton onPress={() => router.replace('/(app)/(tabs)/cards')}>Back to contacts</AppButton>
+      </View>
+    );
+  }
+
+  async function handleToggleFavorite() {
+    if (!person) return;
+    const nextState = !person.is_favorite;
+    try {
+      await toggleFavorite(person.id, nextState);
+      await Promise.all([
+        client.invalidateQueries({ queryKey: cardKeys.all }),
+        client.invalidateQueries({ queryKey: cardKeys.detail(person.id) }),
+      ]);
+    } catch {
+      setError('Could not update favorite status.');
+    }
+  }
+
   async function exportContact() {
-    setBusy(true); setError(null); setNotice(null);
-    try { await exportCardToContacts(person); await markCardExported(person.id); setNotice('Saved to your device contacts.'); await card.refetch(); }
-    catch (reason) { setError(reason instanceof Error ? reason.message : 'We could not export this contact.'); }
-    finally { setBusy(false); }
+    if (!person) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await exportCardToContacts(person);
+      await markCardExported(person.id);
+      setInNativeContacts(true);
+      setNotice('Saved to your phone contacts.');
+      await card.refetch();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Could not export contact.');
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function shareContact() {
-    const text = [person.display_name, [person.job_title, person.company].filter(Boolean).join(' at '), person.primary_phone, person.primary_email, person.website].filter(Boolean).join('\n');
+    if (!person) return;
+    const text = [
+      person.display_name,
+      [person.job_title, person.company].filter(Boolean).join(' at '),
+      person.primary_phone,
+      person.primary_email,
+      person.website,
+    ]
+      .filter(Boolean)
+      .join('\n');
     await Share.share({ title: person.display_name ?? 'Card Nest contact', message: text });
   }
 
   function confirmDelete() {
-    Alert.alert('Delete this card?', 'The contact and its private card images will be permanently removed.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: () => void (async () => {
-        setBusy(true); setError(null);
-        try { await deleteCard(person); await client.invalidateQueries({ queryKey: cardKeys.all }); router.replace('/(app)/(tabs)/cards'); }
-        catch { setError('We could not delete this card. Please try again.'); setBusy(false); }
-      })() },
-    ]);
+    Alert.alert(
+      'Delete contact?',
+      'This contact and its private card images will be permanently removed.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => void executeDelete(),
+        },
+      ]
+    );
+  }
+
+  async function executeDelete() {
+    if (!person) return;
+    setIsDeleting(true);
+    setError(null);
+    try {
+      await deleteCard(person);
+      await client.invalidateQueries({ queryKey: cardKeys.all });
+      setIsDeleting(false);
+      router.replace('/(app)/(tabs)/cards');
+    } catch {
+      setIsDeleting(false);
+      setError('We could not delete this contact. Please try again.');
+    }
   }
 
   async function handleDuplicate(action: 'merge' | 'separate') {
-    setBusy(true); setError(null);
+    if (!person) return;
+    setBusy(true);
+    setError(null);
     try {
       if (action === 'merge') {
         const existingId = await mergeDuplicateCard(person);
@@ -61,48 +175,397 @@ export default function CardDetailScreen() {
       } else {
         await keepCardSeparate(person.id);
         await card.refetch();
-        setNotice('This card will be kept as a separate contact.');
+        setNotice('Kept as a separate contact.');
       }
-    } catch { setError('We could not resolve this possible duplicate. Please try again.'); }
-    finally { setBusy(false); }
+    } catch {
+      setError('Could not resolve duplicate. Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function copyValue(label: string, value: string) {
+    void Clipboard.setStringAsync(value);
+    setToastMessage(`${label} copied to clipboard`);
+    setTimeout(() => setToastMessage(null), 2500);
   }
 
   return (
     <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: theme.colors.background }]}>
-      <Stack.Screen options={{ headerShown: true, title: person.display_name ?? 'Card details', headerRight: () => <Pressable accessibilityLabel={person.is_favorite ? 'Remove from favorites' : 'Add to favorites'} onPress={() => favorite.mutate({ cardId: person.id, isFavorite: !person.is_favorite })}><MaterialCommunityIcons color={person.is_favorite ? theme.colors.warning : theme.colors.textMuted} name={person.is_favorite ? 'star' : 'star-outline'} size={26} /></Pressable> }} />
-      <ScrollView contentContainerStyle={[styles.content, { gap: theme.spacing[5], padding: theme.spacing[5] }]}>
+      <Stack.Screen
+        options={{
+          headerShown: true,
+          title: person.display_name ?? 'Contact Details',
+          headerRight: () => (
+            <Pressable
+              accessibilityLabel={person.is_favorite ? 'Remove from favorites' : 'Add to favorites'}
+              onPress={() => void handleToggleFavorite()}>
+              <MaterialCommunityIcons
+                color={person.is_favorite ? theme.colors.warning : theme.colors.textMuted}
+                name={person.is_favorite ? 'star' : 'star-outline'}
+                size={26}
+              />
+            </Pressable>
+          ),
+        }}
+      />
+
+      {/* Blocking Progress Modal for Delete */}
+      <Modal animationType="fade" transparent visible={isDeleting}>
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalBox, { backgroundColor: theme.colors.surface, borderRadius: theme.radii.lg }]}>
+            <ActivityIndicator color={theme.colors.danger} size="large" />
+            <AppText variant="title">Deleting contact...</AppText>
+            <AppText muted variant="caption">
+              Cleaning up card details and private images
+            </AppText>
+          </View>
+        </View>
+      </Modal>
+
+      <ScrollView contentContainerStyle={[styles.content, { gap: theme.spacing[4], padding: theme.spacing[5] }]}>
+        {/* Contact Avatar & Person Overview Header */}
         <View style={styles.hero}>
-          <View style={[styles.avatar, { backgroundColor: theme.colors.primarySoft }]}><AppText variant="display" style={{ color: theme.colors.primary }}>{(person.display_name ?? person.company ?? '?').split(/\s+/u).slice(0, 2).map((word) => word[0]).join('').toUpperCase()}</AppText></View>
-          <AppText accessibilityRole="header" variant="display" style={styles.centerText}>{person.display_name ?? person.company ?? 'Unnamed card'}</AppText>
-          <AppText muted style={styles.centerText}>{[person.job_title, person.company].filter(Boolean).join(' · ')}</AppText>
+          <ContactAvatar
+            company={person.company}
+            contactPhotoPath={person.contact_photo_path}
+            email={person.primary_email}
+            name={person.display_name}
+            size={96}
+          />
+
+          <AppText accessibilityRole="header" variant="display" style={styles.centerText}>
+            {person.display_name ?? person.company ?? 'Unnamed contact'}
+          </AppText>
+
+          <AppText muted style={styles.centerText}>
+            {[person.job_title, person.company].filter(Boolean).join(' · ')}
+          </AppText>
+
+          {inNativeContacts ? (
+            <View style={[styles.inContactsBadge, { backgroundColor: theme.colors.primarySoft }]}>
+              <MaterialCommunityIcons color={theme.colors.primary} name="check-circle" size={15} />
+              <AppText variant="caption" style={{ color: theme.colors.primary, fontWeight: '700' }}>
+                ✓ In your contacts
+              </AppText>
+            </View>
+          ) : null}
         </View>
-        {notice ? <AuthNotice message={notice} tone="success" /> : null}{error ? <AuthNotice message={error} /> : null}
-        {person.duplicate_of_id ? <View style={[styles.duplicate, { backgroundColor: theme.colors.warningSoft, borderColor: theme.colors.warning, borderRadius: theme.radii.lg, padding: theme.spacing[4] }]}><MaterialCommunityIcons color={theme.colors.warning} name="account-multiple-check-outline" size={26} /><View style={styles.detailCopy}><AppText variant="bodyStrong">Possible duplicate</AppText><AppText variant="caption">Card Nest found a similar saved contact. Review both before merging.</AppText><View style={styles.duplicateActions}><AppButton disabled={busy} onPress={() => void handleDuplicate('merge')}>Merge contacts</AppButton><AppButton disabled={busy} onPress={() => void handleDuplicate('separate')} variant="secondary">Keep separate</AppButton></View></View></View> : null}
+
+        {notice ? <AuthNotice message={notice} tone="success" /> : null}
+        {error ? <AuthNotice message={error} /> : null}
+        {toastMessage ? <AuthNotice message={toastMessage} tone="success" /> : null}
+
+        {/* Duplicate Banner */}
+        {person.duplicate_of_id ? (
+          <View
+            style={[
+              styles.duplicate,
+              {
+                backgroundColor: theme.colors.warningSoft,
+                borderColor: theme.colors.warning,
+                borderRadius: theme.radii.lg,
+                padding: theme.spacing[4],
+              },
+            ]}>
+            <MaterialCommunityIcons color={theme.colors.warning} name="account-multiple-check-outline" size={26} />
+            <View style={styles.detailCopy}>
+              <AppText variant="bodyStrong">Possible duplicate</AppText>
+              <AppText variant="caption">Card Nest found a similar saved contact. Review before merging.</AppText>
+              <View style={styles.duplicateActions}>
+                <AppButton disabled={busy} onPress={() => void handleDuplicate('merge')}>
+                  Merge contacts
+                </AppButton>
+                <AppButton disabled={busy} onPress={() => void handleDuplicate('separate')} variant="secondary">
+                  Keep separate
+                </AppButton>
+              </View>
+            </View>
+          </View>
+        ) : null}
+
+        {/* Action-First Quick Actions Bar */}
         <View style={styles.quickActions}>
-          <QuickAction disabled={!person.primary_phone} icon="phone-outline" label="Call" onPress={() => void Linking.openURL(`tel:${person.primary_phone}`)} />
-          <QuickAction disabled={!person.primary_email} icon="email-outline" label="Email" onPress={() => void Linking.openURL(`mailto:${person.primary_email}`)} />
-          <QuickAction icon="share-variant-outline" label="Share" onPress={() => void shareContact()} />
-          <QuickAction icon="account-plus-outline" label="Contacts" onPress={() => void exportContact()} />
+          <QuickAction
+            disabled={!person.primary_phone}
+            icon="phone-outline"
+            label="Call"
+            onPress={() => void Linking.openURL(`tel:${person.primary_phone}`)}
+          />
+          <QuickAction
+            disabled={!person.primary_phone}
+            icon="message-outline"
+            label="Message"
+            onPress={() => void Linking.openURL(`sms:${person.primary_phone}`)}
+          />
+          <QuickAction
+            disabled={!person.primary_email}
+            icon="email-outline"
+            label="Email"
+            onPress={() => void Linking.openURL(`mailto:${person.primary_email}`)}
+          />
+          <QuickAction
+            icon="share-variant-outline"
+            label="Share"
+            onPress={() => void shareContact()}
+          />
+          <QuickAction
+            icon={inNativeContacts ? 'account-check-outline' : 'account-plus-outline'}
+            label={inNativeContacts ? 'Saved' : 'Add to phone'}
+            onPress={() => void exportContact()}
+          />
         </View>
-        <Section title="Contact details">
-          <DetailRow icon="email-outline" label="Email" value={person.primary_email} onPress={person.primary_email ? () => void Linking.openURL(`mailto:${person.primary_email}`) : undefined} />
-          <DetailRow icon="phone-outline" label="Phone" value={person.primary_phone} onPress={person.primary_phone ? () => void Linking.openURL(`tel:${person.primary_phone}`) : undefined} />
-          <DetailRow icon="web" label="Website" value={person.website} onPress={person.website ? () => void Linking.openURL(person.website!) : undefined} />
-          <DetailRow icon="map-marker-outline" label="Address" value={[person.address_line_1, person.address_line_2, person.city, person.state_region, person.postal_code, person.country].filter(Boolean).join(', ') || null} />
+
+        {/* Structured Contact Details */}
+        <Section title="Contact Information">
+          <DetailRow
+            icon="phone-outline"
+            label="Phone"
+            onCopy={() => copyValue('Phone', person.primary_phone!)}
+            onPress={() => void Linking.openURL(`tel:${person.primary_phone}`)}
+            value={person.primary_phone}
+          />
+          <DetailRow
+            icon="email-outline"
+            label="Email"
+            onCopy={() => copyValue('Email', person.primary_email!)}
+            onPress={() => void Linking.openURL(`mailto:${person.primary_email}`)}
+            value={person.primary_email}
+          />
+          <DetailRow
+            icon="domain"
+            label="Company"
+            onCopy={() => copyValue('Company', person.company!)}
+            value={person.company}
+          />
+          <DetailRow icon="briefcase-outline" label="Job Title" value={person.job_title} />
+          <DetailRow icon="office-building" label="Department" value={person.department} />
+          <DetailRow
+            icon="web"
+            label="Website"
+            onCopy={() => copyValue('Website', person.website!)}
+            onPress={() => void Linking.openURL(person.website!)}
+            value={person.website}
+          />
+          <DetailRow
+            icon="map-marker-outline"
+            label="Address"
+            onCopy={() =>
+              copyValue(
+                'Address',
+                [
+                  person.address_line_1,
+                  person.address_line_2,
+                  person.city,
+                  person.state_region,
+                  person.postal_code,
+                  person.country,
+                ]
+                  .filter(Boolean)
+                  .join(', ')
+              )
+            }
+            value={
+              [
+                person.address_line_1,
+                person.address_line_2,
+                person.city,
+                person.state_region,
+                person.postal_code,
+                person.country,
+              ]
+                .filter(Boolean)
+                .join(', ') || null
+            }
+          />
         </Section>
-        <Section title="Tags"><CardTagsEditor card={person} /></Section>
-        {person.notes ? <Section title="Notes"><AppText>{person.notes}</AppText></Section> : null}
-        {images.front || images.back ? <Section title="Original card"><View style={styles.images}>{(['front', 'back'] as const).map((side) => images[side] ? <View key={side} style={styles.imageWrap}><Image contentFit="contain" source={images[side]} style={[styles.image, { backgroundColor: theme.colors.background, borderRadius: theme.radii.md }]} /><AppText muted variant="caption">{side === 'front' ? 'Front' : 'Back'}</AppText></View> : null)}</View></Section> : null}
-        <View style={styles.actions}><AppButton onPress={() => router.push({ pathname: '/(app)/cards/[id]/edit', params: { id } })}>Edit contact</AppButton><AppButton disabled={busy} onPress={confirmDelete} variant="secondary">Delete card</AppButton></View>
+
+        <Section title="Tags">
+          <CardTagsEditor card={person} />
+        </Section>
+
+        {person.notes ? (
+          <Section title="Notes">
+            <AppText>{person.notes}</AppText>
+          </Section>
+        ) : null}
+
+        {/* Original Scanned Card Images */}
+        {images.front || images.back ? (
+          <Section title="Original Scanned Business Card">
+            <View style={styles.images}>
+              {(['front', 'back'] as const).map((side) =>
+                images[side] ? (
+                  <View key={side} style={styles.imageWrap}>
+                    <Image
+                      contentFit="contain"
+                      source={images[side]}
+                      style={[styles.image, { backgroundColor: theme.colors.background, borderRadius: theme.radii.md }]}
+                    />
+                    <AppText muted variant="caption">
+                      {side === 'front' ? 'Front Side' : 'Back Side'}
+                    </AppText>
+                  </View>
+                ) : null
+              )}
+            </View>
+          </Section>
+        ) : null}
+
+        {/* Action Controls */}
+        <View style={styles.actions}>
+          <AppButton onPress={() => router.push({ pathname: '/(app)/cards/[id]/edit', params: { id } })}>
+            Edit Contact Details
+          </AppButton>
+          <AppButton disabled={busy || isDeleting} onPress={confirmDelete} variant="secondary">
+            Delete Contact
+          </AppButton>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-function QuickAction({ icon, label, onPress, disabled = false }: { icon: keyof typeof MaterialCommunityIcons.glyphMap; label: string; onPress: () => void; disabled?: boolean }) { const theme = useAppTheme(); return <Pressable accessibilityLabel={label} accessibilityRole="button" disabled={disabled} onPress={onPress} style={({ pressed }) => [styles.quick, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, borderRadius: theme.radii.md, opacity: disabled ? 0.35 : pressed ? 0.65 : 1 }]}><MaterialCommunityIcons color={theme.colors.primary} name={icon} size={24} /><AppText variant="caption">{label}</AppText></Pressable>; }
-function Section({ title, children }: { title: string; children: React.ReactNode }) { const theme = useAppTheme(); return <View style={[styles.section, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, borderRadius: theme.radii.lg, gap: theme.spacing[3], padding: theme.spacing[5] }]}><AppText variant="title">{title}</AppText>{children}</View>; }
-function DetailRow({ icon, label, value, onPress }: { icon: keyof typeof MaterialCommunityIcons.glyphMap; label: string; value: string | null; onPress?: () => void }) { const theme = useAppTheme(); if (!value) return null; return <Pressable accessibilityRole={onPress ? 'link' : undefined} onLongPress={() => void Clipboard.setStringAsync(value)} onPress={onPress} style={styles.detail}><MaterialCommunityIcons color={theme.colors.primary} name={icon} size={21} /><View style={styles.detailCopy}><AppText muted variant="caption">{label}</AppText><AppText>{value}</AppText></View><MaterialCommunityIcons color={theme.colors.textMuted} name="content-copy" onPress={() => void Clipboard.setStringAsync(value)} size={18} /></Pressable>; }
+function QuickAction({
+  icon,
+  iconColor,
+  label,
+  onPress,
+  disabled = false,
+}: {
+  icon: keyof typeof MaterialCommunityIcons.glyphMap;
+  iconColor?: string;
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+}) {
+  const theme = useAppTheme();
+  return (
+    <Pressable
+      accessibilityLabel={label}
+      accessibilityRole="button"
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.quick,
+        {
+          backgroundColor: theme.colors.surface,
+          borderColor: theme.colors.border,
+          borderRadius: theme.radii.md,
+          opacity: disabled ? 0.35 : pressed ? 0.65 : 1,
+        },
+      ]}>
+      <MaterialCommunityIcons color={iconColor ?? theme.colors.primary} name={icon} size={22} />
+      <AppText variant="caption" style={{ fontSize: 11, textAlign: 'center' }}>
+        {label}
+      </AppText>
+    </Pressable>
+  );
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  const theme = useAppTheme();
+  return (
+    <View
+      style={[
+        styles.section,
+        {
+          backgroundColor: theme.colors.surface,
+          borderColor: theme.colors.border,
+          borderRadius: theme.radii.lg,
+          gap: theme.spacing[3],
+          padding: theme.spacing[5],
+        },
+      ]}>
+      <AppText variant="title">{title}</AppText>
+      {children}
+    </View>
+  );
+}
+
+function DetailRow({
+  icon,
+  label,
+  value,
+  onPress,
+  onCopy,
+}: {
+  icon: keyof typeof MaterialCommunityIcons.glyphMap;
+  label: string;
+  value: string | null;
+  onPress?: () => void;
+  onCopy?: () => void;
+}) {
+  const theme = useAppTheme();
+  if (!value) return null;
+
+  return (
+    <Pressable
+      accessibilityRole={onPress ? 'link' : undefined}
+      onLongPress={onCopy}
+      onPress={onPress ?? onCopy}
+      style={styles.detail}>
+      <MaterialCommunityIcons color={theme.colors.primary} name={icon} size={21} />
+      <View style={styles.detailCopy}>
+        <AppText muted variant="caption">
+          {label}
+        </AppText>
+        <AppText style={{ color: onPress ? theme.colors.primary : theme.colors.text }}>{value}</AppText>
+      </View>
+      {onCopy ? (
+        <Pressable accessibilityLabel={`Copy ${label}`} hitSlop={8} onPress={onCopy}>
+          <MaterialCommunityIcons color={theme.colors.textMuted} name="content-copy" size={18} />
+        </Pressable>
+      ) : null}
+    </Pressable>
+  );
+}
 
 const styles = StyleSheet.create({
-  actions: { gap: 12 }, avatar: { alignItems: 'center', borderRadius: 32, height: 96, justifyContent: 'center', width: 96 }, center: { alignItems: 'center', flex: 1, gap: 18, justifyContent: 'center' }, centerText: { textAlign: 'center' }, content: { alignSelf: 'center', maxWidth: 760, paddingBottom: 40, width: '100%' }, detail: { alignItems: 'center', flexDirection: 'row', gap: 12, minHeight: 54 }, detailCopy: { flex: 1 }, duplicate: { alignItems: 'flex-start', borderWidth: 1, flexDirection: 'row', gap: 12 }, duplicateActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 }, hero: { alignItems: 'center', gap: 7, paddingVertical: 16 }, image: { aspectRatio: 1.58, width: '100%' }, imageWrap: { flex: 1, gap: 5, minWidth: 220 }, images: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 }, quick: { alignItems: 'center', borderWidth: 1, flex: 1, gap: 4, justifyContent: 'center', minHeight: 70, minWidth: 70 }, quickActions: { flexDirection: 'row', gap: 8 }, safeArea: { flex: 1 }, section: { borderWidth: 1 },
+  actions: { gap: 12 },
+  center: { alignItems: 'center', flex: 1, gap: 18, justifyContent: 'center' },
+  centerText: { textAlign: 'center' },
+  content: { alignSelf: 'center', maxWidth: 760, paddingBottom: 40, width: '100%' },
+  detail: { alignItems: 'center', flexDirection: 'row', gap: 12, minHeight: 54 },
+  detailCopy: { flex: 1 },
+  duplicate: { alignItems: 'flex-start', borderWidth: 1, flexDirection: 'row', gap: 12 },
+  duplicateActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
+  hero: { alignItems: 'center', gap: 8, paddingVertical: 12 },
+  image: { aspectRatio: 1.58, width: '100%' },
+  imageWrap: { flex: 1, gap: 5, minWidth: 220 },
+  images: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  inContactsBadge: {
+    alignItems: 'center',
+    borderRadius: 999,
+    flexDirection: 'row',
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+  },
+  modalBackdrop: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    flex: 1,
+    justifyContent: 'center',
+    padding: 24,
+  },
+  modalBox: {
+    alignItems: 'center',
+    gap: 12,
+    maxWidth: 340,
+    padding: 28,
+    width: '100%',
+  },
+  quick: {
+    alignItems: 'center',
+    borderWidth: 1,
+    flex: 1,
+    gap: 4,
+    justifyContent: 'center',
+    minHeight: 64,
+    paddingHorizontal: 4,
+  },
+  quickActions: { flexDirection: 'row', gap: 8 },
+  safeArea: { flex: 1 },
+  section: { borderWidth: 1 },
 });
