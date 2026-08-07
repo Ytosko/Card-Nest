@@ -3,7 +3,8 @@ import Link from 'next/link';
 import { Brand } from './brand';
 
 const links = [
-  { href: '/#why-card-nest', label: 'Why Card Nest' },
+  { href: '/#what-card-nest-does', label: 'What Card Nest does' },
+  { href: '/#google-sign-in', label: 'Google Sign-In' },
   { href: '/privacy', label: 'Privacy' },
   { href: '/terms', label: 'Terms' },
 ];
