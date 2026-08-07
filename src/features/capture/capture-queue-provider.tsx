@@ -270,8 +270,8 @@ export function CaptureQueueProvider({ children }: PropsWithChildren) {
   const deleteFailedItem = useCallback(
     async (item: CaptureQueueItem) => {
       // Cloud cleanup first: orphan card images, draft extraction data, and the placeholder
-      // card record (never a contact already saved through Review). Related processing_jobs
-      // rows cascade with the card record.
+      // card record (never a saved contact). Related processing_jobs rows cascade with the
+      // card record.
       await deleteFailedCaptureArtifacts(item.cardId, item.userId);
       // Then durable local capture files and the queue record itself.
       removePreparedCapture(item.id);

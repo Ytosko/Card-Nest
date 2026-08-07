@@ -94,7 +94,8 @@ export async function runConfiguredExtraction(cardId: string, userId: string, im
       extraction_model: model,
       extraction_confidence: extracted.confidence,
       extraction_quality: { reviewed: false, failed: false, source_count: imageUris.length },
-      status: 'review' as const,
+      // Successful extractions save directly as visible contacts — review/editing is optional.
+      status: 'ready' as const,
     };
 
     if (__DEV__) {
@@ -107,7 +108,7 @@ export async function runConfiguredExtraction(cardId: string, userId: string, im
       });
     }
 
-    // Stage 4: Prepare Review State & Persist Structured Contact Record
+    // Stage 4: Persist Structured Contact Record (saved directly, editable afterwards)
     const { data: existing, error: existingError } = await supabase
       .from('cards')
       .select('*')
@@ -198,8 +199,7 @@ export async function runConfiguredExtraction(cardId: string, userId: string, im
       .eq('id', job.id);
 
     if (__DEV__) {
-      console.log(`[CardNest AI Pipeline] Review state prepared`, { cardId, status: 'review' });
-      console.log(`[CardNest AI Pipeline] Navigating to Review Contact`, { cardId });
+      console.log(`[CardNest AI Pipeline] Contact saved`, { cardId, status: 'ready' });
     }
 
     return true;

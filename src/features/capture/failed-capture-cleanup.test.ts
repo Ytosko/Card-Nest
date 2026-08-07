@@ -19,8 +19,14 @@ vi.mock('expo-file-system', () => {
 
 const storageRemove = vi.fn().mockResolvedValue({ error: null });
 const cardDelete = vi.fn().mockResolvedValue({ error: null });
-let cardRow: { id: string; status: string; user_id: string; contact_photo_path: string | null; card_images: { storage_path: string }[] } | null =
-  null;
+let cardRow: {
+  id: string;
+  status: string;
+  user_id: string;
+  contact_photo_path: string | null;
+  extraction_quality?: { failed?: boolean; error?: string };
+  card_images: { storage_path: string }[];
+} | null = null;
 
 vi.mock('@/src/lib/supabase/client', () => ({
   supabase: {
@@ -49,7 +55,7 @@ describe('deleteFailedCaptureArtifacts', () => {
     cardRow = null;
   });
 
-  it('never deletes a contact that was saved through Review (status ready)', async () => {
+  it('never deletes a saved contact (status ready)', async () => {
     cardRow = {
       id: 'aaaaaaa1-aaaa-4aaa-8aaa-aaaaaaaaaaa1',
       status: 'ready',
@@ -62,6 +68,37 @@ describe('deleteFailedCaptureArtifacts', () => {
 
     expect(cardDelete).not.toHaveBeenCalled();
     expect(storageRemove).not.toHaveBeenCalled();
+  });
+
+  it('never deletes a legacy review card whose extraction succeeded', async () => {
+    cardRow = {
+      id: 'aaaaaaa1-aaaa-4aaa-8aaa-aaaaaaaaaaa1',
+      status: 'review',
+      user_id: '11111111-1111-4111-8111-111111111111',
+      contact_photo_path: null,
+      extraction_quality: { failed: false },
+      card_images: [],
+    };
+
+    await deleteFailedCaptureArtifacts('aaaaaaa1-aaaa-4aaa-8aaa-aaaaaaaaaaa1', '11111111-1111-4111-8111-111111111111');
+
+    expect(cardDelete).not.toHaveBeenCalled();
+    expect(storageRemove).not.toHaveBeenCalled();
+  });
+
+  it('deletes a review placeholder whose extraction failed', async () => {
+    cardRow = {
+      id: 'aaaaaaa2-aaaa-4aaa-8aaa-aaaaaaaaaaa2',
+      status: 'review',
+      user_id: '11111111-1111-4111-8111-111111111111',
+      contact_photo_path: null,
+      extraction_quality: { failed: true, error: 'AI extraction could not read this card.' },
+      card_images: [],
+    };
+
+    await deleteFailedCaptureArtifacts('aaaaaaa2-aaaa-4aaa-8aaa-aaaaaaaaaaa2', '11111111-1111-4111-8111-111111111111');
+
+    expect(cardDelete).toHaveBeenCalledWith('aaaaaaa2-aaaa-4aaa-8aaa-aaaaaaaaaaa2');
   });
 
   it('removes the placeholder card record and cloud images for a failed capture', async () => {

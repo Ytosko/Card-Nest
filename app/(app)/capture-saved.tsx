@@ -29,7 +29,7 @@ export default function CaptureSavedScreen() {
     if (isUploading) return 'Uploading securely…';
     if (isProcessing) return 'Reading your card…';
     if (isFailed) return "Couldn't read this card";
-    return 'Ready to review!';
+    return 'Contact saved!';
   };
 
   const getStatusBody = () => {
@@ -41,7 +41,7 @@ export default function CaptureSavedScreen() {
         item?.lastError ||
         'Your photos are safe on this device. Check your connection or AI settings and try again.'
       );
-    return 'Your card is processed and saved. Review and adjust contact details whenever you are ready.';
+    return 'Your card was processed and saved to your contacts. Open it to fine-tune any detail.';
   };
 
   return (
@@ -95,8 +95,8 @@ export default function CaptureSavedScreen() {
 
       <View style={styles.actions}>
         {isSynced || !item ? (
-          <AppButton onPress={() => router.replace({ pathname: '/(app)/cards/[id]/edit', params: { id } })}>
-            Review contact
+          <AppButton onPress={() => router.replace({ pathname: '/(app)/cards/[id]', params: { id } })}>
+            View contact
           </AppButton>
         ) : null}
 

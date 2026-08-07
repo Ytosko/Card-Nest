@@ -24,7 +24,7 @@ import { AuthNotice } from '@/src/features/auth/components/auth-notice';
 import { useAuth } from '@/src/features/auth/auth-provider';
 import { cardKeys, useCards } from '@/src/features/cards/card-hooks';
 import { CardListRow } from '@/src/features/cards/components/card-list-row';
-import { bulkDeleteCards, bulkToggleFavorite, markCardExported } from '@/src/features/cards/card-service';
+import { bulkDeleteCards, bulkToggleFavorite, isSavedContact, markCardExported } from '@/src/features/cards/card-service';
 import { exportCardToContacts } from '@/src/features/contacts/contact-export';
 import { useCaptureQueue } from '@/src/features/capture/capture-queue-provider';
 import { useAppTheme } from '@/src/theme/theme-provider';
@@ -57,21 +57,9 @@ export default function ContactsScreen() {
 
   const pendingQueue = queue.items.filter((item) => item.state !== 'synced');
 
-  // Saved contacts only — extractions still awaiting Review → Save are surfaced separately
-  // and never mixed into the contact library.
-  const rawCards = useMemo(
-    () => (cardsQuery.data ?? []).filter((card) => card.status === 'ready'),
-    [cardsQuery.data]
-  );
-  const reviewCards = useMemo(
-    () =>
-      (cardsQuery.data ?? []).filter((card) => {
-        if (card.status !== 'review') return false;
-        const quality = card.extraction_quality as { failed?: boolean } | null;
-        return !quality?.failed;
-      }),
-    [cardsQuery.data]
-  );
+  // Saved contacts only — failed-extraction placeholders never surface here; they are
+  // managed from the Sync page.
+  const rawCards = useMemo(() => (cardsQuery.data ?? []).filter(isSavedContact), [cardsQuery.data]);
 
   // Instant live client-side search & filtering across all fields
   const filteredCards = useMemo(() => {
@@ -125,7 +113,7 @@ export default function ContactsScreen() {
   }, [rawCards, input, activeChip, sortMode]);
 
   const hasAnyContacts = rawCards.length > 0;
-  const hasAnyRecords = hasAnyContacts || reviewCards.length > 0 || pendingQueue.length > 0;
+  const hasAnyRecords = hasAnyContacts || pendingQueue.length > 0;
   const selectedCount = selectedIds.size;
   const isAllFilteredSelected = filteredCards.length > 0 && filteredCards.every((c) => selectedIds.has(c.id));
 
@@ -307,7 +295,7 @@ export default function ContactsScreen() {
             <EmptyState body="Select another filter chip to see your saved contacts." icon="filter-variant" title="Nothing in this view" />
           ) : hasAnyRecords ? (
             <EmptyState
-              body="A scanned card is waiting above. Review and save it to add it to your contact library."
+              body="Your scanned card is still processing. It will appear here automatically once it syncs."
               icon="progress-check"
               title="No saved contacts yet"
             />
@@ -406,26 +394,6 @@ export default function ContactsScreen() {
                 <MaterialCommunityIcons color={theme.colors.primary} name="chevron-right" size={20} />
               </Pressable>
             ) : null}
-
-            {/* Needs Review — extracted cards not yet saved as contacts */}
-            {reviewCards.length > 0 && !isSelectionMode
-              ? reviewCards.map((reviewCard) => (
-                  <Pressable
-                    accessibilityLabel={`Review extracted contact ${reviewCard.display_name ?? 'New business card'}`}
-                    key={reviewCard.id}
-                    onPress={() => router.push({ pathname: '/(app)/cards/[id]/edit', params: { id: reviewCard.id } })}
-                    style={[styles.reviewBanner, { backgroundColor: theme.colors.warningSoft, borderColor: theme.colors.warning }]}>
-                    <MaterialCommunityIcons color={theme.colors.warning} name="file-document-edit-outline" size={20} />
-                    <View style={{ flex: 1 }}>
-                      <AppText variant="label">{reviewCard.display_name ?? 'New business card'}</AppText>
-                      <AppText muted variant="caption">
-                        Extraction ready · Tap to review and save
-                      </AppText>
-                    </View>
-                    <MaterialCommunityIcons color={theme.colors.warning} name="chevron-right" size={20} />
-                  </Pressable>
-                ))
-              : null}
 
             {/* Prominent Search Bar */}
             <View style={[styles.searchBar, { backgroundColor: theme.colors.surface, borderColor: theme.colors.borderStrong }]}>
@@ -649,14 +617,6 @@ const styles = StyleSheet.create({
     maxWidth: 340,
     padding: 24,
     width: '100%',
-  },
-  reviewBanner: {
-    alignItems: 'center',
-    borderRadius: 12,
-    borderWidth: 1,
-    flexDirection: 'row',
-    gap: 12,
-    padding: 12,
   },
   safeArea: { flex: 1 },
   searchBar: {

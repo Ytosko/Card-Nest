@@ -50,9 +50,23 @@ function cardValues(draft: CardDraft) {
   };
 }
 
+/**
+ * A card counts as a saved, visible contact when extraction (or manual entry) completed.
+ * Legacy 'review' rows from the pre-direct-save flow count too unless their extraction
+ * failed — failed placeholders are managed from the Sync page, never shown as contacts.
+ */
+export function isSavedContact(card: Pick<Card, 'status'> & { extraction_quality?: unknown }): boolean {
+  if (card.status === 'ready') return true;
+  if (card.status === 'review') {
+    const quality = card.extraction_quality as { failed?: boolean } | null | undefined;
+    return !quality?.failed;
+  }
+  return false;
+}
+
 export async function listCards(limit = 100) {
   // Placeholder cards mid-capture (capture_pending/uploading/processing/failed) must never
-  // surface as contacts; only saved contacts and extractions awaiting review are listed.
+  // surface as contacts; callers refine with isSavedContact for failed-extraction rows.
   const { data, error } = await supabase
     .from('cards')
     .select('*, card_emails(*), card_phone_numbers(*), card_websites(*), card_addresses(*), card_images(*), card_tags(tags(*))')
@@ -252,18 +266,18 @@ export async function bulkToggleFavorite(cardIds: string[], isFavorite: boolean)
 
 /**
  * Removes the placeholder card record and any orphan cloud files created by a failed capture.
- * Contacts saved through Review (status 'ready') are never touched — deleting a failed
- * processing job must not destroy a valid contact. Related rows (card_images, processing_jobs,
- * emails/phones/etc.) cascade with the card row.
+ * Saved contacts are never touched — deleting a failed processing job must not destroy a
+ * valid contact. Related rows (card_images, processing_jobs, emails/phones/etc.) cascade
+ * with the card row.
  */
 export async function deleteFailedCaptureArtifacts(cardId: string, userId: string): Promise<void> {
   const { data: card, error } = await supabase
     .from('cards')
-    .select('id, status, user_id, contact_photo_path, card_images(storage_path)')
+    .select('id, status, user_id, contact_photo_path, extraction_quality, card_images(storage_path)')
     .eq('id', cardId)
     .maybeSingle();
   if (error) throw error;
-  if (card && card.status === 'ready') return;
+  if (card && isSavedContact(card)) return;
 
   // Remove cloud images at both recorded and deterministic paths — an upload can succeed
   // in Storage even when the card_images metadata row was never written.
