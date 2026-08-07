@@ -84,11 +84,13 @@ The development site is available at `http://localhost:3000`. Validate the produ
 npm run web:check
 ```
 
-The initial website requires no environment variables.
+The website requires `SUPABASE_URL` and `SUPABASE_ANON_KEY` at runtime for its server-side email-verification bridge. These are public client credentials, not administrative secrets. Local Compose automatically falls back to the matching `EXPO_PUBLIC_SUPABASE_*` values in the ignored root `.env`.
 
 ## Docker deployment
 
 The root Compose stack contains only the production website. It uses a multi-stage standalone Next.js build and does not run a development server, Metro, Expo, Supabase, or Postgres.
+
+Before a production deployment, set `SUPABASE_URL` and `SUPABASE_ANON_KEY` on the web service. Never provide a service-role key to the website.
 
 ```bash
 docker compose build
@@ -110,6 +112,8 @@ npm run check
 npm run db:verify
 npm run auth:verify
 npm run auth:flow-verify
+npm run auth:web-flow-verify
+npm run web:check
 ```
 
 Database types are generated from the linked hosted project:

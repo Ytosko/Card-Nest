@@ -37,6 +37,13 @@ const apiUrl = `https://api.supabase.com/v1/projects/${encodeURIComponent(env.SU
 const logoObjectName = 'cardnest-email-logo.png';
 const logoUrl = `${env.EXPO_PUBLIC_SUPABASE_URL}/storage/v1/object/public/brand-assets/${logoObjectName}`;
 const templateNames = ['confirmation', 'recovery', 'email-change', 'magic-link', 'invite'];
+const templateFlowTypes = {
+  confirmation: 'signup',
+  recovery: 'recovery',
+  'email-change': 'email_change',
+  'magic-link': 'magiclink',
+  invite: 'invite',
+};
 
 async function managementRequest(method, body) {
   const response = await fetch(apiUrl, {
@@ -130,6 +137,13 @@ async function verifyConfiguration(config) {
   };
   for (const name of templateNames) {
     if (remoteTemplates[name] !== templates[name]) throw new Error(`Hosted Auth template verification failed for ${name}.`);
+    if (remoteTemplates[name].includes('{{ .ConfirmationURL }}')) {
+      throw new Error(`Hosted Auth template ${name} still exposes the Supabase confirmation URL.`);
+    }
+    const firstPartyLink = `{{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&amp;type=${templateFlowTypes[name]}`;
+    if (!remoteTemplates[name].includes(firstPartyLink)) {
+      throw new Error(`Hosted Auth template ${name} is missing its first-party Card Nest verification link.`);
+    }
   }
 
   const redirectList = String(config.uri_allow_list ?? '');
@@ -190,6 +204,6 @@ await verifyConfiguration(hostedConfig);
 
 console.log(
   verifyOnly
-    ? 'Hosted Card Nest Auth verification passed: Postmark, SMTP metadata, redirects, confirmations, and five branded templates match.'
-    : 'Hosted Card Nest Auth configured and verified: Postmark, SMTP, redirects, confirmations, brand asset, and five templates are active.',
+    ? 'Hosted Card Nest Auth verification passed: Postmark, SMTP metadata, redirects, confirmations, and five first-party branded templates match.'
+    : 'Hosted Card Nest Auth configured and verified: Postmark, SMTP, redirects, confirmations, brand asset, and five first-party templates are active.',
 );

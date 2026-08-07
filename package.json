@@ -18,6 +18,7 @@
     "auth:configure": "node ./scripts/configure-supabase-auth.mjs",
     "auth:verify": "node ./scripts/configure-supabase-auth.mjs --verify-only",
     "auth:flow-verify": "node ./scripts/verify-auth-flow.mjs",
+    "auth:web-flow-verify": "node ./scripts/verify-web-auth-callback.mjs",
     "security:verify-bundle": "node ./scripts/verify-no-secret-bundle.mjs",
     "security:verify-repository": "node ./scripts/verify-repository-secrets.mjs",
     "web:install": "npm ci --prefix web",

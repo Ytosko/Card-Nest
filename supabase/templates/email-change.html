@@ -4,6 +4,6 @@
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:#FFFFFF;border:1px solid #E6EEF0;border-radius:20px;overflow:hidden"><tr><td style="height:8px;background:#0CC0DF"></td></tr><tr><td style="padding:32px">
 <img src="__CARDNEST_LOGO_URL__" width="64" height="64" alt="Card Nest" style="display:block;border:0;border-radius:14px;margin-bottom:20px"><p style="margin:0 0 8px;color:#079CB8;font-size:13px;font-weight:bold;letter-spacing:1px">SECURITY CHECK</p>
 <h1 style="margin:0 0 16px;font-size:28px;line-height:36px">Confirm your new email</h1><p style="margin:0 0 24px;color:#60767C;font-size:16px;line-height:25px">Approve the change from {{ .Email }} to {{ .NewEmail }}.</p>
-<a href="{{ .ConfirmationURL }}" style="display:inline-block;background:#079CB8;color:#FFFFFF;text-decoration:none;font-weight:bold;padding:14px 22px;border-radius:12px">Confirm email change</a>
+<a href="{{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&amp;type=email_change" style="display:inline-block;background:#079CB8;color:#FFFFFF;text-decoration:none;font-weight:bold;padding:14px 22px;border-radius:12px">Confirm email change</a>
 <p style="margin:24px 0 0;color:#60767C;font-size:13px;line-height:20px">If you did not request this change, do not use the link and secure your account.</p>
 </td></tr></table><p style="color:#60767C;font-size:12px">Card Nest · Private by design.</p></td></tr></table></body></html>

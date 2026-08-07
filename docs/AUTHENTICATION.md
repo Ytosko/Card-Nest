@@ -23,7 +23,9 @@ The stable production scheme is:
 cardnest://auth/callback
 ```
 
-The hosted web callback is `https://cardnest.ytosko.dev/auth/callback`, and the hosted Supabase Site URL is `https://cardnest.ytosko.dev`.
+The hosted web callback is `https://cardnest.ytosko.dev/auth/callback`, and the hosted Supabase Site URL is `https://cardnest.ytosko.dev`. Every transactional email links to this Card Nest URL with a one-time token hash. The callback posts that hash to a same-origin server endpoint, which verifies it with Supabase using only the public anon/publishable key. The browser is never redirected to a Supabase domain.
+
+After successful verification, the callback removes the token hash from the browser address bar and hands the returned session to the mobile app through `cardnest://auth/callback`. Recovery sessions continue to the in-app reset-password screen. Expired, already-used, malformed, rate-limited, and temporarily unavailable links stay on the branded Card Nest page with a safe error message.
 
 `Linking.createURL()` is used at runtime so Expo Go receives its current LAN callback URL. Hosted Auth allows the Card Nest scheme, Expo Go callbacks, and local web callback ports. Production and development builds should continue using the stable `cardnest` scheme configured in `app.json`.
 
@@ -48,10 +50,11 @@ Apply and verify hosted configuration without displaying secrets:
 npm run auth:configure
 npm run auth:verify
 npm run auth:flow-verify
+npm run auth:web-flow-verify
 npm run security:verify-bundle
 ```
 
-`auth:verify` checks the Postmark server token, hosted SMTP metadata, callback allow list, confirmation setting, and exact template contents. `auth:flow-verify` creates and removes a disposable non-deliverable test account to verify confirmation enforcement, password sign-in, token issuance, profile provisioning/RLS, profile updates, and sign-out without sending an email.
+`auth:verify` checks the Postmark server token, hosted SMTP metadata, callback allow list, confirmation setting, and exact first-party template contents. `auth:flow-verify` creates and removes a disposable non-deliverable test account to verify confirmation enforcement, password sign-in, token issuance, profile provisioning/RLS, profile updates, and sign-out without sending an email. With a production web server running locally on port 3100, `auth:web-flow-verify` generates a real one-time signup token without sending email, verifies it through the Card Nest server endpoint, confirms token reuse is rejected, and removes the disposable account.
 
 After `npx expo export --platform web`, `security:verify-bundle` scans the generated output for the configured server-role, database, SMTP, and Postmark values and reports only credential names if a leak is ever detected.
 

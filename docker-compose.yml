@@ -8,6 +8,8 @@ services:
       NODE_ENV: production
       HOSTNAME: 0.0.0.0
       PORT: 3000
+      SUPABASE_URL: ${SUPABASE_URL:-${EXPO_PUBLIC_SUPABASE_URL:-}}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-${EXPO_PUBLIC_SUPABASE_ANON_KEY:-}}
     expose:
       - "3000"
     healthcheck:

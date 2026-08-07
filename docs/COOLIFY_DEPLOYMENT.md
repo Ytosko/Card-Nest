@@ -38,14 +38,21 @@ The `:3000` suffix tells Coolify that the application listens on container port 
 
 ## Environment variables
 
-No Coolify environment variables are required for the initial website. `NODE_ENV`, `HOSTNAME`, and `PORT` are already defined in `docker-compose.yml` and contain no secrets.
+Add these runtime variables to the `web` service in Coolify:
 
-The Expo and Supabase administration values in the repository-root `.env.example` are not web-container variables. Do not copy service-role, database, Postmark, Supabase access-token, or AI credentials into the website service.
+```text
+SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
+SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_OR_PUBLISHABLE_KEY
+```
+
+Use the same public values as `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_ANON_KEY`. The server-side callback uses them to verify email token hashes without navigating the browser to a Supabase domain. The anon/publishable key is designed for public clients; authorization remains enforced by Auth and RLS.
+
+`NODE_ENV`, `HOSTNAME`, and `PORT` are already defined in `docker-compose.yml`. Do not copy the service-role key, database credentials, Postmark credentials, Supabase management access token, or AI credentials into the website service.
 
 ## Deploy and verify
 
 1. Click **Deploy**.
-2. Confirm the Docker Compose build uses `web/Dockerfile` and the service reaches `healthy` state.
+2. Confirm the Docker Compose build uses `web/Dockerfile` and the service reaches `healthy` state. A `configuration_required` health response means one or both public Supabase runtime variables are missing.
 3. Open `https://cardnest.ytosko.dev`.
 4. Verify the health endpoint:
 
