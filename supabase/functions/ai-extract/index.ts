@@ -108,9 +108,11 @@ const openAiJsonSchema = {
         properties: {
           number: { type: 'string' },
           label: { type: 'string' },
+          service: { type: 'string' },
+          serviceLabel: { type: 'string' },
           isPrimary: { type: 'boolean' },
         },
-        required: ['number', 'label', 'isPrimary'],
+        required: ['number', 'label', 'service', 'serviceLabel', 'isPrimary'],
       },
     },
     websites: { type: 'array', items: { type: 'string' } },
@@ -159,8 +161,30 @@ Multilingual & Field extraction rules:
 2. Phone numbers, email addresses, websites, social URLs, and identifiers MUST NOT be translated or modified (preserve international country prefixes like +880, +1, +44, +91, etc.).
 3. Extract EVERY phone number printed on the card (Mobile, Office, Direct, Landline, Fax, Work) into the phones array with labels. Mark the primary phone with isPrimary=true.
 4. Extract EVERY email address printed on the card (Work, Personal) into the emails array with labels. Mark the primary email with isPrimary=true.
-5. Always store the complete, raw original transcription of ALL printed text on the card (in its original language and native script) in rawText so source-language information is preserved.
-6. Set confidence between 0 and 1 representing overall OCR and parsing certainty.`;
+5. If the card explicitly labels a number or identifier with a messaging or payment service (WhatsApp, IMO, Telegram, Viber, LINE, WeChat, Signal, Messenger, bKash, Nagad, Rocket, etc.), set that phone's service to the lowercase service name and serviceLabel to the label exactly as printed. NEVER assign a service that is not explicitly printed on the card.
+6. Always store the complete, raw original transcription of ALL printed text on the card (in its original language and native script) in rawText so source-language information is preserved.
+7. Set confidence between 0 and 1 representing overall OCR and parsing certainty.`;
+
+// Normalizes provider HTTP failures into Card Nest error codes. Model-gone errors are
+// distinguished from generic bad requests so the app can prompt a model change.
+function classifyProviderError(status: number, bodyText: string): string {
+  const lower = bodyText.toLowerCase();
+  if (status === 401 || status === 403) return 'AI_AUTH_FAILED';
+  if (status === 429) return 'AI_RATE_LIMITED';
+  if (
+    status === 404 ||
+    lower.includes('model_not_found') ||
+    lower.includes('does not exist') ||
+    lower.includes('is not found') ||
+    lower.includes('was not found') ||
+    lower.includes('decommissioned') ||
+    lower.includes('deprecated')
+  ) {
+    return 'AI_MODEL_UNAVAILABLE';
+  }
+  if (status === 400) return 'AI_MODEL_UNSUPPORTED';
+  return 'AI_PROVIDER_ERROR';
+}
 
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -266,18 +290,9 @@ Deno.serve(async (request) => {
 
         if (!response.ok) {
           const errBody = await response.text();
-          const errCode =
-            response.status === 401 || response.status === 403
-              ? 'AI_AUTH_FAILED'
-              : response.status === 429
-              ? 'AI_RATE_LIMITED'
-              : response.status === 400 || response.status === 404
-              ? 'AI_MODEL_UNSUPPORTED'
-              : 'AI_PROVIDER_ERROR';
-
           return json({
             ok: false,
-            code: errCode,
+            code: classifyProviderError(response.status, errBody),
             provider: 'openai',
             providerStatus: response.status,
             message: `OpenAI API (${response.status}): ${errBody.slice(0, 150)}`,
@@ -312,18 +327,9 @@ Deno.serve(async (request) => {
 
         if (!response.ok) {
           const errBody = await response.text();
-          const errCode =
-            response.status === 401 || response.status === 403
-              ? 'AI_AUTH_FAILED'
-              : response.status === 429
-              ? 'AI_RATE_LIMITED'
-              : response.status === 400 || response.status === 404
-              ? 'AI_MODEL_UNSUPPORTED'
-              : 'AI_PROVIDER_ERROR';
-
           return json({
             ok: false,
-            code: errCode,
+            code: classifyProviderError(response.status, errBody),
             provider: 'gemini',
             providerStatus: response.status,
             message: `Gemini API (${response.status}): ${errBody.slice(0, 150)}`,

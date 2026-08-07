@@ -14,12 +14,34 @@ export type AiErrorCode =
   | 'AI_DECRYPTION_FAILED'
   | 'AI_MODEL_MISSING'
   | 'AI_MODEL_UNSUPPORTED'
+  | 'AI_MODEL_UNAVAILABLE'
   | 'AI_AUTH_FAILED'
   | 'AI_RATE_LIMITED'
   | 'AI_PROVIDER_ERROR'
   | 'AI_IMAGE_PREP_FAILED'
   | 'AI_RESPONSE_INVALID'
+  | 'AI_NETWORK_ERROR'
   | 'NETWORK_ERROR';
+
+/** Classifies a provider HTTP failure into a normalized Card Nest error code. */
+export function classifyProviderHttpError(status: number, bodyText: string): AiErrorCode {
+  const lower = bodyText.toLowerCase();
+  if (status === 401 || status === 403) return 'AI_AUTH_FAILED';
+  if (status === 429) return 'AI_RATE_LIMITED';
+  if (
+    status === 404 ||
+    lower.includes('model_not_found') ||
+    lower.includes('does not exist') ||
+    lower.includes('is not found') ||
+    lower.includes('was not found') ||
+    lower.includes('decommissioned') ||
+    lower.includes('deprecated')
+  ) {
+    return 'AI_MODEL_UNAVAILABLE';
+  }
+  if (status === 400) return 'AI_MODEL_UNSUPPORTED';
+  return 'AI_PROVIDER_ERROR';
+}
 
 export class AiExtractionError extends Error {
   code: AiErrorCode;
@@ -131,8 +153,9 @@ Multilingual & Field extraction rules:
 2. Phone numbers, email addresses, websites, social URLs, and identifiers MUST NOT be translated or modified (preserve international country prefixes like +880, +1, +44, +91, etc.).
 3. Extract EVERY phone number printed on the card (Mobile, Office, Direct, Landline, Fax, Work) into the phones array with labels. Mark the primary phone with isPrimary=true.
 4. Extract EVERY email address printed on the card (Work, Personal) into the emails array with labels. Mark the primary email with isPrimary=true.
-5. Always store the complete, raw original transcription of ALL printed text on the card (in its original language and native script) in rawText so source-language information is preserved.
-6. Set confidence between 0 and 1 representing overall OCR and parsing certainty.`;
+5. If the card explicitly labels a number or identifier with a messaging or payment service (WhatsApp, IMO, Telegram, Viber, LINE, WeChat, Signal, Messenger, bKash, Nagad, Rocket, etc.), set that phone's service to the lowercase service name and serviceLabel to the label exactly as printed. NEVER assign a service that is not explicitly printed on the card.
+6. Always store the complete, raw original transcription of ALL printed text on the card (in its original language and native script) in rawText so source-language information is preserved.
+7. Set confidence between 0 and 1 representing overall OCR and parsing certainty.`;
 
 // SecureStore fallback helpers
 export async function getProviderKey(provider: AiProvider): Promise<string | null> {
@@ -208,44 +231,8 @@ export async function removeServerCredential(provider: AiProvider) {
   void supabase.functions.invoke(`ai-credentials?provider=${provider}`, { method: 'DELETE' });
 }
 
-// Strictly filter to vision/multimodal compatible models
-export async function fetchProviderModels(provider: AiProvider, apiKey?: string) {
-  const activeKey = apiKey || (await getProviderKey(provider));
-
-  if (provider === 'openai') {
-    if (!activeKey) return ['gpt-4o', 'gpt-4o-mini'];
-    try {
-      const response = await fetch('https://api.openai.com/v1/models', {
-        headers: { Authorization: `Bearer ${activeKey}` },
-      });
-      if (!response.ok) return ['gpt-4o', 'gpt-4o-mini'];
-      const body = await response.json();
-      const list = (body.data as { id: string }[])
-        .map((model) => model.id)
-        .filter((id) => /^(gpt-4o|gpt-4-turbo|gpt-4-vision|o1|o3)/u.test(id) && !/(audio|realtime|transcribe|tts|search|image)/u.test(id))
-        .sort((a, b) => b.localeCompare(a));
-      return list.length ? list : ['gpt-4o', 'gpt-4o-mini'];
-    } catch {
-      return ['gpt-4o', 'gpt-4o-mini'];
-    }
-  }
-
-  if (!activeKey) return ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash'];
-  try {
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(activeKey)}`);
-    if (!response.ok) return ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash'];
-    const body = await response.json();
-    const list = (body.models as { name: string; supportedGenerationMethods?: string[] }[])
-      .filter((model) => model.supportedGenerationMethods?.includes('generateContent'))
-      .map((model) => model.name.replace(/^models\//u, ''))
-      .filter((id) => /gemini/u.test(id) && !/(image|tts|embedding|aqa)/u.test(id))
-      .sort((a, b) => b.localeCompare(a));
-
-    return list.length ? list : ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash'];
-  } catch {
-    return ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash'];
-  }
-}
+// Model discovery lives in model-catalog.ts: dynamic, capability-driven, cached,
+// with no hardcoded fallback catalog — the provider API is the source of truth.
 
 // Stage 2: Safe Structural Logging & Schema Validation
 export function validateExtractionResponse(
@@ -418,12 +405,7 @@ async function extractWithOpenAIDirect(model: string, apiKey: string, images: st
 
   if (!response.ok) {
     const errText = await response.text();
-    const code: AiErrorCode =
-      response.status === 401 || response.status === 403
-        ? 'AI_AUTH_FAILED'
-        : response.status === 429
-        ? 'AI_RATE_LIMITED'
-        : 'AI_PROVIDER_ERROR';
+    const code = classifyProviderHttpError(response.status, errText);
     throw new AiExtractionError(code, `OpenAI API returned ${response.status}: ${errText.slice(0, 100)}`, {
       httpStatus: response.status,
       provider: 'openai',
@@ -469,12 +451,7 @@ async function extractWithGeminiDirect(model: string, apiKey: string, images: st
 
   if (!response.ok) {
     const errText = await response.text();
-    const code: AiErrorCode =
-      response.status === 401 || response.status === 403
-        ? 'AI_AUTH_FAILED'
-        : response.status === 429
-        ? 'AI_RATE_LIMITED'
-        : 'AI_PROVIDER_ERROR';
+    const code = classifyProviderHttpError(response.status, errText);
     throw new AiExtractionError(code, `Gemini API returned ${response.status}: ${errText.slice(0, 100)}`, {
       httpStatus: response.status,
       provider: 'gemini',

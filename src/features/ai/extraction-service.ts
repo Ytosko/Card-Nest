@@ -1,4 +1,5 @@
-import { getProviderKey, getServerCredentialStatus, extractBusinessCard, type AiProvider } from '@/src/features/ai/ai-provider';
+import { AiExtractionError, getProviderKey, getServerCredentialStatus, extractBusinessCard, type AiProvider } from '@/src/features/ai/ai-provider';
+import { checkSelectedModelAgainstCache, recordModelValidation } from '@/src/features/ai/model-catalog';
 import { duplicateScore } from '@/src/features/cards/duplicate-score';
 import { supabase } from '@/src/lib/supabase/client';
 
@@ -28,6 +29,21 @@ export async function runConfiguredExtraction(cardId: string, userId: string, im
       status: 'review',
       extraction_quality: { failed: true, error: reason },
     }).eq('id', cardId);
+    return false;
+  }
+
+  // Cheap pre-flight against the cached model catalog: never send a scan to a model
+  // already known to be gone. 'unknown' (no fresh cache) must not block extraction —
+  // real availability is enforced by the provider call's AI_MODEL_UNAVAILABLE mapping.
+  if (checkSelectedModelAgainstCache(provider, model) === 'unavailable') {
+    const reason = `Your selected model (${model}) is no longer available. Choose another model in Settings > AI.`;
+    await supabase.from('cards').update({
+      status: 'review',
+      extraction_quality: { failed: true, error: reason },
+    }).eq('id', cardId);
+    if (__DEV__) {
+      console.warn(`[CardNest AI Pipeline] Skipping extraction — cached catalog marks model unavailable`, { provider, model });
+    }
     return false;
   }
 
@@ -204,7 +220,18 @@ export async function runConfiguredExtraction(cardId: string, userId: string, im
 
     return true;
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'AI extraction could not read this card.';
+    const modelGone = error instanceof AiExtractionError && error.code === 'AI_MODEL_UNAVAILABLE';
+    if (modelGone) {
+      // Mark the saved model stale in the cached catalog so future scans fail fast
+      // instead of repeatedly calling a dead model. The user's preference itself is
+      // never silently switched — they choose the replacement.
+      recordModelValidation(provider, model, { status: 'unavailable', message: 'Provider reports this model is gone.' });
+    }
+    const errorMessage = modelGone
+      ? `Your selected model (${model}) is no longer available. Choose another model in Settings > AI, then retry.`
+      : error instanceof Error
+        ? error.message
+        : 'AI extraction could not read this card.';
     if (__DEV__) {
       console.error(`[CardNest AI Pipeline] Processing pipeline error`, {
         cardId,
