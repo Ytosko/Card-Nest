@@ -1,5 +1,4 @@
 import { randomUUID } from 'expo-crypto';
-import { File } from 'expo-file-system';
 import { useNetworkState } from 'expo-network';
 import {
   createContext,
@@ -17,7 +16,7 @@ import { runConfiguredExtraction } from '@/src/features/ai/extraction-service';
 import { getCardImageStoragePath } from '@/src/lib/supabase/storage-paths';
 import { supabase } from '@/src/lib/supabase/client';
 
-import { prepareCaptureFiles, removePreparedCapture } from './capture-files';
+import { prepareCaptureFiles, readCardImageAsBase64, removePreparedCapture } from './capture-files';
 import {
   insertQueueItem,
   listQueueItems,
@@ -107,10 +106,12 @@ export function CaptureQueueProvider({ children }: PropsWithChildren) {
         ];
 
         for (const side of sides) {
-          const file = new File(side.uri);
+          const imageResult = await readCardImageAsBase64(side.uri, item.cardId, side.side, user.id);
+          const buffer = Buffer.from(imageResult.base64, 'base64');
+
           const { error: uploadError } = await supabase.storage
             .from('card-images')
-            .upload(side.path, await file.arrayBuffer(), { contentType: 'image/jpeg', upsert: true });
+            .upload(side.path, buffer, { contentType: 'image/jpeg', upsert: true });
           if (uploadError) throw uploadError;
 
           const { error: metadataError } = await supabase.from('card_images').upsert(
@@ -120,7 +121,7 @@ export function CaptureQueueProvider({ children }: PropsWithChildren) {
               side: side.side,
               storage_path: side.path,
               mime_type: 'image/jpeg',
-              byte_size: file.size || null,
+              byte_size: imageResult.byteSize || buffer.length || null,
             },
             { onConflict: 'card_id,side' }
           );
@@ -145,7 +146,6 @@ export function CaptureQueueProvider({ children }: PropsWithChildren) {
           return false;
         } else {
           await updateQueueItem(item.id, 'synced', { attemptCount: attempt, lastError: null, nextRetryAt: null });
-          removePreparedCapture(item.id);
           return true;
         }
       } catch (catchedError) {
@@ -259,7 +259,12 @@ export function CaptureQueueProvider({ children }: PropsWithChildren) {
 
   const dismissSynced = useCallback(async () => {
     const synced = items.filter((item) => item.state === 'synced');
-    await Promise.all(synced.map((item) => removeQueueItem(item.id)));
+    await Promise.all(
+      synced.map(async (item) => {
+        removePreparedCapture(item.id);
+        await removeQueueItem(item.id);
+      })
+    );
     await refresh();
   }, [items, refresh]);
 

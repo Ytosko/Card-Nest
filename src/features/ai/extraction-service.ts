@@ -54,7 +54,14 @@ export async function runConfiguredExtraction(cardId: string, userId: string, im
       .eq('id', cardId);
 
     // Stage 1 & Stage 2: Invoke Backend & Validate Response
-    const extracted = await extractBusinessCard(provider, model, localKey, imageUris);
+    const imageInputs = imageUris.map((uri, idx) => ({
+      uri,
+      cardId,
+      side: (idx === 0 ? 'front' : 'back') as 'front' | 'back',
+      userId,
+    }));
+
+    const extracted = await extractBusinessCard(provider, model, localKey, imageInputs);
 
     // Stage 3: Normalize Contact Data & Structural Metadata
     const primaryPhoneItem = extracted.phones.find((p) => p.isPrimary) || extracted.phones[0];

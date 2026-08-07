@@ -283,30 +283,41 @@ export function validateExtractionResponse(
   }
 }
 
+export type ExtractionImageInput =
+  | string
+  | { uri: string; cardId?: string; side?: 'front' | 'back'; userId?: string };
+
 // Stage 1: Invoke Backend Edge Function (with explicit transport failure fallback)
 export async function extractBusinessCard(
   provider: AiProvider,
   model: string,
   apiKey: string | null,
-  imageUris: string[]
+  imagesInput: ExtractionImageInput[]
 ): Promise<ExtractedCard> {
-  let images: string[] = [];
+  let imageResults: { base64: string; source: 'local' | 'cloud'; byteSize: number }[] = [];
   try {
-    const { File } = await import('expo-file-system');
-    images = await Promise.all(imageUris.map(async (uri) => new File(uri).base64()));
-  } catch {
-    throw new AiExtractionError(
-      'AI_IMAGE_PREP_FAILED',
-      'Could not read card photo files for processing.',
-      { provider, model, stage: 'imagePrep' }
+    const { readCardImageAsBase64 } = await import('@/src/features/capture/capture-files');
+    imageResults = await Promise.all(
+      imagesInput.map(async (input) => {
+        if (typeof input === 'string') {
+          return readCardImageAsBase64(input);
+        }
+        return readCardImageAsBase64(input.uri, input.cardId, input.side, input.userId);
+      })
     );
+  } catch (prepErr) {
+    const msg = prepErr instanceof Error ? prepErr.message : 'Could not read card photo files for processing.';
+    throw new AiExtractionError('AI_IMAGE_PREP_FAILED', msg, { provider, model, stage: 'imagePrep' });
   }
+
+  const images = imageResults.map((r) => r.base64);
 
   if (__DEV__) {
     console.log(`[CardNest AI Pipeline] Invoking backend extraction`, {
       provider,
       model,
       imageCount: images.length,
+      imageSources: imageResults.map((r) => r.source),
     });
   }
 
