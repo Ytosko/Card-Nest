@@ -1,6 +1,7 @@
 import { File } from 'expo-file-system';
 import * as ImageManipulator from 'expo-image-manipulator';
 
+import { toUploadArrayBuffer } from '@/src/features/capture/capture-files';
 import { supabase } from '@/src/lib/supabase/client';
 import { getCardImageStoragePath } from '@/src/lib/supabase/storage-paths';
 import type { Card, Tables, TablesUpdate } from '@/src/types/database.helpers';

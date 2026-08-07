@@ -49,49 +49,55 @@ export default function GoogleAuthCallbackPage() {
   useEffect(() => {
     let openTimer: number | undefined;
 
-    const search = new URLSearchParams(window.location.search);
-    const hash = new URLSearchParams(window.location.hash.replace(/^#/u, ''));
-    // Session material and provider parameters must never stay in the visible URL
-    // or browser history.
-    window.history.replaceState({}, '', '/gauth/callback');
+    async function completeSignIn() {
+      const search = new URLSearchParams(window.location.search);
+      const hash = new URLSearchParams(window.location.hash.replace(/^#/u, ''));
+      // Session material and provider parameters must never stay in the visible URL
+      // or browser history.
+      window.history.replaceState({}, '', '/gauth/callback');
 
-    const suppliedError =
-      search.get('error') ?? hash.get('error');
-    const suppliedErrorCode = search.get('error_code') ?? hash.get('error_code');
-    const suppliedDescription = search.get('error_description') ?? hash.get('error_description');
+      const suppliedError = search.get('error') ?? hash.get('error');
+      const suppliedErrorCode = search.get('error_code') ?? hash.get('error_code');
+      const suppliedDescription = search.get('error_description') ?? hash.get('error_description');
 
-    if (suppliedError || suppliedErrorCode) {
-      setErrorKind(classifyError(suppliedError, suppliedErrorCode, suppliedDescription));
-      setState('error');
-      return;
+      await Promise.resolve();
+
+      if (suppliedError || suppliedErrorCode) {
+        setErrorKind(classifyError(suppliedError, suppliedErrorCode, suppliedDescription));
+        setState('error');
+        return;
+      }
+
+      const accessToken = hash.get('access_token') ?? search.get('access_token');
+      const refreshToken = hash.get('refresh_token') ?? search.get('refresh_token');
+      const code = search.get('code') ?? hash.get('code');
+
+      let nextAppLink: string | null = null;
+      if (accessToken && refreshToken) {
+        const fragment = new URLSearchParams({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+          type: 'oauth',
+        });
+        nextAppLink = `cardnest://auth/callback#${fragment.toString()}`;
+      } else if (code) {
+        const query = new URLSearchParams({ code, flow: 'oauth' });
+        nextAppLink = `cardnest://auth/callback?${query.toString()}`;
+      }
+
+      if (!nextAppLink) {
+        setErrorKind('invalid');
+        setState('error');
+        return;
+      }
+
+      const appLinkToOpen = nextAppLink;
+      setAppLink(appLinkToOpen);
+      setState('success');
+      openTimer = window.setTimeout(() => window.location.assign(appLinkToOpen), 650);
     }
 
-    const accessToken = hash.get('access_token') ?? search.get('access_token');
-    const refreshToken = hash.get('refresh_token') ?? search.get('refresh_token');
-    const code = search.get('code') ?? hash.get('code');
-
-    let nextAppLink: string | null = null;
-    if (accessToken && refreshToken) {
-      const fragment = new URLSearchParams({
-        access_token: accessToken,
-        refresh_token: refreshToken,
-        type: 'oauth',
-      });
-      nextAppLink = `cardnest://auth/callback#${fragment.toString()}`;
-    } else if (code) {
-      const query = new URLSearchParams({ code, flow: 'oauth' });
-      nextAppLink = `cardnest://auth/callback?${query.toString()}`;
-    }
-
-    if (!nextAppLink) {
-      setErrorKind('invalid');
-      setState('error');
-      return;
-    }
-
-    setAppLink(nextAppLink);
-    setState('success');
-    openTimer = window.setTimeout(() => window.location.assign(nextAppLink), 650);
+    void completeSignIn();
 
     return () => {
       if (openTimer) window.clearTimeout(openTimer);
