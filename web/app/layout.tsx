@@ -11,20 +11,28 @@ const googleSiteVerification = process.env.GOOGLE_SITE_VERIFICATION?.trim();
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
-  title: { default: 'Card Nest — Turn business cards into searchable contacts', template: '%s | Card Nest' },
+  title: { default: 'Card Nest — Business card scanner and contact manager', template: '%s | Card Nest' },
   description:
-    'Card Nest is a business card scanner for Android and iOS. Photograph business cards, extract contact details with your own AI provider, organize and search your contacts, sync them securely across devices, and export them to your phone.',
+    'Card Nest is an Android and iOS business card scanner and contact manager. Photograph business cards, extract contact details with your selected AI provider, organize and search your contacts, sync them securely across devices, and optionally add them to your phone’s Contacts app.',
   applicationName: 'Card Nest',
-  alternates: { canonical: '/' },
+  // Next.js normalizes the root canonical to the no-trailing-slash form; for a domain
+  // root both forms are the identical URL (empty path resolves to "/").
+  alternates: { canonical: 'https://cardnest.ytosko.dev/' },
   icons: { icon: '/logo.svg', apple: '/logo.svg' },
   ...(googleSiteVerification ? { verification: { google: googleSiteVerification } } : {}),
   openGraph: {
     type: 'website',
-    url: siteUrl,
+    url: `${siteUrl}/`,
     siteName: 'Card Nest',
-    title: 'Card Nest — Turn business cards into searchable contacts',
+    title: 'Card Nest — Business card scanner and contact manager',
     description:
-      'Photograph business cards, extract contact details with your own AI provider, and keep every contact organized, searchable, and securely synced across Android and iOS.',
+      'Photograph business cards, extract contact details with your selected AI provider, and keep every contact organized, searchable, and securely synced across Android and iOS.',
+  },
+  twitter: {
+    card: 'summary',
+    title: 'Card Nest — Business card scanner and contact manager',
+    description:
+      'Photograph business cards, extract contact details with your selected AI provider, and keep every contact organized, searchable, and securely synced across Android and iOS.',
   },
 };
 

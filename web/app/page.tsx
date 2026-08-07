@@ -33,22 +33,41 @@ const features = [
   },
 ];
 
+const softwareApplicationJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: 'Card Nest',
+  operatingSystem: 'Android, iOS',
+  applicationCategory: 'BusinessApplication',
+  url: 'https://cardnest.ytosko.dev/',
+  description:
+    'Card Nest is an Android and iOS business card scanner and contact manager. Take a photo of a physical business card and Card Nest uses your selected AI provider to extract contact details such as names, phone numbers, email addresses, company names, and addresses. You can review, organize, search, and securely sync your business contacts, then optionally add them to your phone’s Contacts app.',
+};
+
 export default function HomePage() {
   return (
     <>
+      <script
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(softwareApplicationJsonLd) }}
+        type="application/ld+json"
+      />
       <section className="container grid items-center gap-12 py-20 lg:grid-cols-[1.1fr_0.9fr] lg:py-28">
         <div className="max-w-3xl">
           <div className="mb-7 inline-flex items-center gap-2 rounded-full border border-[#bcecf4] bg-white px-4 py-2 text-sm font-bold text-[#067a90]">
             <span className="h-2 w-2 rounded-full bg-[#0CC0DF]" aria-hidden />
-            Business card scanner for Android and iOS
+            For Android and iOS
           </div>
           <h1 className="text-5xl font-bold leading-[1.04] tracking-[-0.055em] sm:text-6xl lg:text-7xl">
-            Card Nest turns business cards into <span className="text-[#079cb8]">searchable contacts.</span>
+            Card Nest
+            <span className="mt-3 block text-3xl font-bold leading-[1.15] tracking-[-0.035em] text-[#079cb8] sm:text-4xl">
+              Business card scanner and contact manager
+            </span>
           </h1>
           <p className="mt-7 max-w-2xl text-lg leading-8 text-[#526a70] sm:text-xl">
-            Card Nest is a mobile app for Android and iOS that lets you photograph physical business cards, extract the
-            contact details with your own AI provider, and keep every business contact organized, searchable, and
-            securely synced across your devices — with optional export to your phone’s Contacts app.
+            Card Nest is an Android and iOS business card scanner and contact manager. Take a photo of a physical
+            business card and Card Nest uses your selected AI provider to extract contact details such as names, phone
+            numbers, email addresses, company names, and addresses. You can review, organize, search, and securely sync
+            your business contacts, then optionally add them to your phone’s Contacts app.
           </p>
           <div className="mt-9 flex flex-wrap gap-4">
             <Link
@@ -110,15 +129,14 @@ export default function HomePage() {
       <section className="container py-20" id="google-sign-in">
         <div className="card-shadow rounded-[2rem] border border-[#dbe8eb] bg-white p-8 sm:p-12">
           <p className="text-sm font-bold tracking-[0.12em] text-[#079cb8]">SIGNING IN WITH GOOGLE</p>
-          <h2 className="mt-3 text-3xl font-bold tracking-[-0.045em] sm:text-4xl">How Card Nest uses Google Sign-In</h2>
+          <h2 className="mt-3 text-3xl font-bold tracking-[-0.045em] sm:text-4xl">Google Sign-In</h2>
           <p className="mt-6 max-w-3xl text-lg leading-8 text-[#526a70]">
-            Card Nest uses Google Sign-In only to authenticate your Card Nest account and, when you authorize it, obtain
-            basic identity information: your name, email address, and profile picture. That information is used to
-            create and secure your Card Nest account.
+            Card Nest uses Google Sign-In to authenticate your Card Nest account and, when authorized, receive basic
+            profile information such as your name, email address, and profile picture. Card Nest does not use Google
+            Sign-In to access your Gmail, Google Drive, Google Calendar, or Google Contacts.
           </p>
           <p className="mt-4 max-w-3xl leading-8 text-[#60767c]">
-            Card Nest does not access your Gmail, Google Contacts, Google Drive, Google Calendar, or any other Google
-            account data. You can also sign in with an email address and password instead. Details are in the{' '}
+            You can also sign in with an email address and password instead. Details are in the{' '}
             <Link className="focus-ring rounded font-semibold text-[#067a90] underline underline-offset-4 hover:text-[#079cb8]" href="/privacy">
               Card Nest Privacy Policy
             </Link>
