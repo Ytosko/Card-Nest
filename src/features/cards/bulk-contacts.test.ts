@@ -16,7 +16,7 @@ vi.mock('expo-file-system', () => {
     this.uri = uri;
     this.exists = true;
     this.size = 1024;
-    this.arrayBuffer = vi.fn().mockResolvedValue(new ArrayBuffer(8));
+    this.bytes = vi.fn().mockResolvedValue(new Uint8Array(8));
   }
   return { Directory: MockDirectory, File: MockFile, Paths: { document: 'file:///app-doc-dir' } };
 });

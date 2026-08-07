@@ -17,7 +17,7 @@ import { deleteFailedCaptureArtifacts } from '@/src/features/cards/card-service'
 import { getCardImageStoragePath } from '@/src/lib/supabase/storage-paths';
 import { supabase } from '@/src/lib/supabase/client';
 
-import { prepareCaptureFiles, readCardImageAsBase64, removePreparedCapture } from './capture-files';
+import { prepareCaptureFiles, readCardImageBytes, removePreparedCapture, toUploadArrayBuffer } from './capture-files';
 import {
   insertQueueItem,
   listQueueItems,
@@ -116,12 +116,27 @@ export function CaptureQueueProvider({ children }: PropsWithChildren) {
         ];
 
         for (const side of sides) {
-          const imageResult = await readCardImageAsBase64(side.uri, item.cardId, side.side, user.id);
-          const buffer = Buffer.from(imageResult.base64, 'base64');
+          // React Native has no Node Buffer — read raw bytes via expo-file-system and
+          // upload as an ArrayBuffer, the Supabase-documented binary path for RN.
+          const imageResult = await readCardImageBytes(side.uri, item.cardId, side.side, user.id);
+          const body = toUploadArrayBuffer(imageResult.bytes);
+
+          if (__DEV__) {
+            console.log(`[CardNest Queue] Uploading card image`, {
+              jobId: item.id,
+              cardId: item.cardId,
+              side: side.side,
+              stage: 'upload',
+              uriScheme: side.uri.slice(0, 15),
+              byteSize: imageResult.byteSize,
+              mimeType: 'image/jpeg',
+              source: imageResult.source,
+            });
+          }
 
           const { error: uploadError } = await supabase.storage
             .from('card-images')
-            .upload(side.path, buffer, { contentType: 'image/jpeg', upsert: true });
+            .upload(side.path, body, { contentType: 'image/jpeg', upsert: true });
           if (uploadError) throw uploadError;
 
           const { error: metadataError } = await supabase.from('card_images').upsert(
@@ -131,11 +146,35 @@ export function CaptureQueueProvider({ children }: PropsWithChildren) {
               side: side.side,
               storage_path: side.path,
               mime_type: 'image/jpeg',
-              byte_size: imageResult.byteSize || buffer.length || null,
+              byte_size: imageResult.byteSize || null,
             },
             { onConflict: 'card_id,side' }
           );
           if (metadataError) throw metadataError;
+        }
+
+        // Remote verification: confirm every uploaded image is actually present in the
+        // user's private Storage folder with a non-zero size before continuing.
+        const { data: remoteObjects, error: verifyError } = await supabase.storage
+          .from('card-images')
+          .list(`${user.id}/${item.cardId}`);
+        if (verifyError) throw verifyError;
+        for (const side of sides) {
+          const expectedName = side.path.split('/').pop();
+          const remote = remoteObjects?.find((object) => object.name === expectedName);
+          const remoteSize = (remote?.metadata as { size?: number } | null | undefined)?.size;
+          if (!remote || remoteSize === 0) {
+            throw new Error(`Uploaded ${side.side} image was not found in cloud storage. Retrying.`);
+          }
+          if (__DEV__) {
+            console.log(`[CardNest Queue] Verified uploaded image in cloud storage`, {
+              jobId: item.id,
+              cardId: item.cardId,
+              side: side.side,
+              stage: 'verify',
+              remoteByteSize: remoteSize ?? null,
+            });
+          }
         }
 
         await updateQueueItem(item.id, 'processing', { attemptCount: attempt, lastError: null, nextRetryAt: null });

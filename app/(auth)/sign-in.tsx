@@ -11,13 +11,14 @@ import { getFieldErrors, normalizeEmail, signInSchema, type FieldErrors, validat
 import { AuthLink } from '@/src/features/auth/components/auth-link';
 import { AuthNotice } from '@/src/features/auth/components/auth-notice';
 import { AuthShell } from '@/src/features/auth/components/auth-shell';
+import { AuthMethodDivider, GoogleAuthButton } from '@/src/features/auth/components/google-auth-button';
 import { supabase } from '@/src/lib/supabase/client';
 import { useAppTheme } from '@/src/theme/theme-provider';
 
 export default function SignInScreen() {
   const theme = useAppTheme();
   const router = useRouter();
-  const { initialized, session, setPendingEmail } = useAuth();
+  const { initialized, session, setPendingEmail, signInWithGoogle } = useAuth();
   const params = useLocalSearchParams<{ reset?: string; confirmed?: string }>();
   const passwordRef = useRef<TextInput>(null);
   const [email, setEmail] = useState('');
@@ -25,6 +26,7 @@ export default function SignInScreen() {
   const [errors, setErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
 
   if (initialized && session) return <Redirect href="/(app)/home" />;
 
@@ -54,6 +56,25 @@ export default function SignInScreen() {
       setFormError(getAuthErrorMessage(error instanceof Error ? error : undefined));
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function submitGoogle() {
+    setFormError(null);
+    setGoogleLoading(true);
+    try {
+      const outcome = await signInWithGoogle();
+      if (outcome === 'success') router.replace('/(app)/home');
+      // A cancelled Google flow simply returns to the form without an error.
+    } catch (error) {
+      setFormError(
+        getAuthErrorMessage(
+          error instanceof Error ? error : undefined,
+          'Google sign-in could not be completed. Please try again.'
+        )
+      );
+    } finally {
+      setGoogleLoading(false);
     }
   }
 
@@ -107,9 +128,11 @@ export default function SignInScreen() {
           <View style={styles.forgotRow}>
             <AuthLink href="/(auth)/forgot-password">Forgot password?</AuthLink>
           </View>
-          <AppButton loading={loading} onPress={() => void submit()}>
+          <AppButton disabled={googleLoading} loading={loading} onPress={() => void submit()}>
             Sign in
           </AppButton>
+          <AuthMethodDivider />
+          <GoogleAuthButton disabled={loading} loading={googleLoading} onPress={() => void submitGoogle()} />
         </View>
       </AuthShell>
     </>

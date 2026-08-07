@@ -305,9 +305,11 @@ export async function uploadContactPhoto(cardId: string, userId: string, uri: st
   );
   const path = `${userId}/${cardId}/photo.jpg`;
   const file = new File(resized.uri);
+  // expo-file-system File has no arrayBuffer(); bytes() is the RN-safe binary read.
+  const bytes = await file.bytes();
   const { error: uploadError } = await supabase.storage
     .from('contact-photos')
-    .upload(path, await file.arrayBuffer(), { contentType: 'image/jpeg', upsert: true });
+    .upload(path, toUploadArrayBuffer(bytes), { contentType: 'image/jpeg', upsert: true });
 
   if (uploadError) throw uploadError;
 

@@ -1,5 +1,6 @@
 import type { Session, User } from '@supabase/supabase-js';
 import { useQueryClient } from '@tanstack/react-query';
+import * as WebBrowser from 'expo-web-browser';
 import {
   createContext,
   type PropsWithChildren,
@@ -11,10 +12,25 @@ import {
   useState,
 } from 'react';
 
+import { getPublicEnv } from '@/src/config/env';
 import { supabase } from '@/src/lib/supabase/client';
 import type { Tables } from '@/src/types/database.helpers';
 
+import { parseAuthLink } from './auth-link';
+
+// Completes any pending browser auth session when the app regains focus.
+WebBrowser.maybeCompleteAuthSession();
+
 type Profile = Tables<'profiles'>;
+
+/** Best display name from auth metadata: ours first, then standard OAuth keys. */
+function metadataDisplayName(user: User): string | null {
+  for (const key of ['display_name', 'full_name', 'name'] as const) {
+    const value = user.user_metadata?.[key];
+    if (typeof value === 'string' && value.trim()) return value.trim().slice(0, 120);
+  }
+  return null;
+}
 
 type AuthContextValue = {
   initialized: boolean;
@@ -29,6 +45,7 @@ type AuthContextValue = {
   completeRecovery: () => void;
   refreshProfile: () => Promise<void>;
   updateDisplayName: (displayName: string) => Promise<void>;
+  signInWithGoogle: () => Promise<'success' | 'cancelled'>;
   signOut: () => Promise<void>;
 };
 
@@ -52,13 +69,29 @@ export function AuthProvider({ children }: PropsWithChildren) {
       if (error) throw error;
 
       if (data) {
+        // One-time backfill: fill an empty display name from OAuth metadata (e.g. a
+        // first Google sign-in). A name the user has set is never overwritten.
+        if (!data.display_name) {
+          const metaName = metadataDisplayName(currentUser);
+          if (metaName) {
+            const { data: backfilled } = await supabase
+              .from('profiles')
+              .update({ display_name: metaName })
+              .eq('user_id', currentUser.id)
+              .is('display_name', null)
+              .select('*')
+              .maybeSingle();
+            if (backfilled && mounted.current && activeUserId.current === currentUser.id) {
+              setProfile(backfilled);
+              return;
+            }
+          }
+        }
         if (mounted.current && activeUserId.current === currentUser.id) setProfile(data);
         return;
       }
 
-      const fallbackName = typeof currentUser.user_metadata.display_name === 'string'
-        ? currentUser.user_metadata.display_name.trim().slice(0, 120) || null
-        : null;
+      const fallbackName = metadataDisplayName(currentUser);
       const { data: created, error: createError } = await supabase
         .from('profiles')
         .upsert({ user_id: currentUser.id, display_name: fallbackName })
@@ -126,6 +159,43 @@ export function AuthProvider({ children }: PropsWithChildren) {
     [session?.user],
   );
 
+  const signInWithGoogle = useCallback(async (): Promise<'success' | 'cancelled'> => {
+    const env = getPublicEnv();
+    // Post-OAuth destination: the Card Nest web callback relays the session into the
+    // app via the existing cardnest:// deep-link architecture. Google's own OAuth
+    // redirect URI (the Supabase /auth/v1/callback) is configured server-side.
+    const callbackOrigin = new URL(env.EXPO_PUBLIC_AUTH_CALLBACK_URL).origin;
+    const redirectTo = `${callbackOrigin}/gauth/callback`;
+    const returnUrl = `${env.EXPO_PUBLIC_APP_SCHEME}://auth/callback`;
+
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo, skipBrowserRedirect: true },
+    });
+    if (error) throw error;
+    if (!data?.url) throw new Error('Google sign-in could not be started. Please try again.');
+
+    const result = await WebBrowser.openAuthSessionAsync(data.url, returnUrl);
+    if (result.type !== 'success' || !result.url) return 'cancelled';
+
+    const parsed = parseAuthLink(result.url);
+    if (parsed.kind === 'error') throw new Error(parsed.message);
+    if (parsed.kind === 'session') {
+      const { error: sessionError } = await supabase.auth.setSession({
+        access_token: parsed.accessToken,
+        refresh_token: parsed.refreshToken,
+      });
+      if (sessionError) throw sessionError;
+      return 'success';
+    }
+    if (parsed.kind === 'code') {
+      const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(parsed.code);
+      if (exchangeError) throw exchangeError;
+      return 'success';
+    }
+    throw new Error('Google sign-in did not return a valid Card Nest session. Please try again.');
+  }, []);
+
   const signOut = useCallback(async () => {
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
@@ -145,9 +215,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
       completeRecovery: () => setRecoveryMode(false),
       refreshProfile,
       updateDisplayName,
+      signInWithGoogle,
       signOut,
     }),
-    [initialized, pendingEmail, profile, profileLoading, recoveryMode, refreshProfile, session, signOut, updateDisplayName],
+    [initialized, pendingEmail, profile, profileLoading, recoveryMode, refreshProfile, session, signInWithGoogle, signOut, updateDisplayName],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -351,7 +351,7 @@ export type Database = {
           state_region?: string | null
           status?: string
           updated_at?: string
-          user_id?: string
+          user_id: string
           website?: string | null
         }
         Update: {
@@ -517,6 +517,42 @@ export type Database = {
         }
         Relationships: []
       }
+      user_ai_credentials: {
+        Row: {
+          auth_tag: string
+          created_at: string
+          encrypted_key: string
+          id: string
+          iv: string
+          key_suffix: string
+          provider: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          auth_tag: string
+          created_at?: string
+          encrypted_key: string
+          id?: string
+          iv: string
+          key_suffix: string
+          provider: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          auth_tag?: string
+          created_at?: string
+          encrypted_key?: string
+          id?: string
+          iv?: string
+          key_suffix?: string
+          provider?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_entitlements: {
         Row: {
           created_at: string
@@ -571,42 +607,6 @@ export type Database = {
         }
         Relationships: []
       }
-      user_ai_credentials: {
-        Row: {
-          auth_tag: string
-          created_at: string
-          encrypted_key: string
-          id: string
-          iv: string
-          key_suffix: string
-          provider: 'openai' | 'gemini'
-          updated_at: string
-          user_id: string
-        }
-        Insert: {
-          auth_tag: string
-          created_at?: string
-          encrypted_key: string
-          id?: string
-          iv: string
-          key_suffix: string
-          provider: 'openai' | 'gemini'
-          updated_at?: string
-          user_id: string
-        }
-        Update: {
-          auth_tag?: string
-          created_at?: string
-          encrypted_key?: string
-          id?: string
-          iv?: string
-          key_suffix?: string
-          provider?: 'openai' | 'gemini'
-          updated_at?: string
-          user_id?: string
-        }
-        Relationships: []
-      }
     }
     Views: {
       [_ in never]: never
@@ -619,6 +619,7 @@ export type Database = {
           address_line_2: string | null
           city: string | null
           company: string | null
+          contact_photo_path: string | null
           country: string | null
           created_at: string
           department: string | null

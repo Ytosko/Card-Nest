@@ -12,13 +12,14 @@ import { getFieldErrors, normalizeEmail, signUpSchema, type FieldErrors, validat
 import { AuthLink } from '@/src/features/auth/components/auth-link';
 import { AuthNotice } from '@/src/features/auth/components/auth-notice';
 import { AuthShell } from '@/src/features/auth/components/auth-shell';
+import { AuthMethodDivider, GoogleAuthButton } from '@/src/features/auth/components/google-auth-button';
 import { supabase } from '@/src/lib/supabase/client';
 import { useAppTheme } from '@/src/theme/theme-provider';
 
 export default function SignUpScreen() {
   const theme = useAppTheme();
   const router = useRouter();
-  const { initialized, session, setPendingEmail } = useAuth();
+  const { initialized, session, setPendingEmail, signInWithGoogle } = useAuth();
   const emailRef = useRef<TextInput>(null);
   const passwordRef = useRef<TextInput>(null);
   const confirmationRef = useRef<TextInput>(null);
@@ -29,6 +30,7 @@ export default function SignUpScreen() {
   const [errors, setErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
 
   if (initialized && session) return <Redirect href="/(app)/home" />;
 
@@ -60,6 +62,25 @@ export default function SignUpScreen() {
       setFormError(getAuthErrorMessage(error instanceof Error ? error : undefined, 'We could not create your account. Please try again.'));
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function submitGoogle() {
+    setFormError(null);
+    setGoogleLoading(true);
+    try {
+      const outcome = await signInWithGoogle();
+      if (outcome === 'success') router.replace('/(app)/home');
+      // A cancelled Google flow simply returns to the form without an error.
+    } catch (error) {
+      setFormError(
+        getAuthErrorMessage(
+          error instanceof Error ? error : undefined,
+          'Google sign-in could not be completed. Please try again.'
+        )
+      );
+    } finally {
+      setGoogleLoading(false);
     }
   }
 
@@ -142,9 +163,11 @@ export default function SignUpScreen() {
           <AppText muted variant="caption">
             By continuing, you agree to keep your account credentials secure.
           </AppText>
-          <AppButton loading={loading} onPress={() => void submit()}>
+          <AppButton disabled={googleLoading} loading={loading} onPress={() => void submit()}>
             Create account
           </AppButton>
+          <AuthMethodDivider />
+          <GoogleAuthButton disabled={loading} loading={googleLoading} onPress={() => void submitGoogle()} />
         </View>
       </AuthShell>
     </>
