@@ -110,6 +110,10 @@ async function getPostmarkMessage(recipient) {
         { headers: postmarkHeaders },
       );
       if (!detailResponse.ok) {
+        if (detailResponse.status === 422) {
+          await pause(1_500);
+          continue;
+        }
         throw new Error(`Postmark message detail returned HTTP ${detailResponse.status}.`);
       }
       return detailResponse.json();

@@ -1,4 +1,7 @@
-import * as SQLite from 'expo-sqlite';
+import { Platform } from 'react-native';
+
+import * as NativeDb from './capture-queue-db.native';
+import * as WebDb from './capture-queue-db.web';
 
 export type CaptureQueueState = 'queued' | 'uploading' | 'processing' | 'synced' | 'failed';
 export type CaptureQueueItem = {
@@ -15,55 +18,9 @@ export type CaptureQueueItem = {
   updatedAt: string;
 };
 
-type QueueRow = {
-  id: string; user_id: string; card_id: string; front_uri: string; back_uri: string | null;
-  state: CaptureQueueState; attempt_count: number; last_error: string | null; next_retry_at: string | null;
-  created_at: string; updated_at: string;
-};
+const impl = Platform.OS === 'web' ? WebDb : NativeDb;
 
-const database = SQLite.openDatabaseSync('cardnest-queue.db');
-database.execSync(`
-  PRAGMA journal_mode = WAL;
-  CREATE TABLE IF NOT EXISTS capture_queue (
-    id TEXT PRIMARY KEY NOT NULL,
-    user_id TEXT NOT NULL,
-    card_id TEXT NOT NULL,
-    front_uri TEXT NOT NULL,
-    back_uri TEXT,
-    state TEXT NOT NULL CHECK (state IN ('queued', 'uploading', 'processing', 'synced', 'failed')),
-    attempt_count INTEGER NOT NULL DEFAULT 0,
-    last_error TEXT,
-    next_retry_at TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS capture_queue_user_state_idx ON capture_queue (user_id, state, created_at);
-`);
-
-function fromRow(row: QueueRow): CaptureQueueItem {
-  return { id: row.id, userId: row.user_id, cardId: row.card_id, frontUri: row.front_uri, backUri: row.back_uri, state: row.state, attemptCount: row.attempt_count, lastError: row.last_error, nextRetryAt: row.next_retry_at, createdAt: row.created_at, updatedAt: row.updated_at };
-}
-
-export async function insertQueueItem(item: Omit<CaptureQueueItem, 'state' | 'attemptCount' | 'lastError' | 'nextRetryAt' | 'createdAt' | 'updatedAt'>) {
-  const now = new Date().toISOString();
-  await database.runAsync(
-    'INSERT INTO capture_queue (id, user_id, card_id, front_uri, back_uri, state, attempt_count, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)',
-    item.id, item.userId, item.cardId, item.frontUri, item.backUri, 'queued', now, now,
-  );
-}
-
-export async function listQueueItems(userId: string) {
-  const rows = await database.getAllAsync<QueueRow>('SELECT * FROM capture_queue WHERE user_id = ? ORDER BY created_at DESC', userId);
-  return rows.map(fromRow);
-}
-
-export async function updateQueueItem(id: string, state: CaptureQueueState, values?: { attemptCount?: number; lastError?: string | null; nextRetryAt?: string | null }) {
-  await database.runAsync(
-    'UPDATE capture_queue SET state = ?, attempt_count = COALESCE(?, attempt_count), last_error = ?, next_retry_at = ?, updated_at = ? WHERE id = ?',
-    state, values?.attemptCount ?? null, values?.lastError ?? null, values?.nextRetryAt ?? null, new Date().toISOString(), id,
-  );
-}
-
-export async function removeQueueItem(id: string) {
-  await database.runAsync('DELETE FROM capture_queue WHERE id = ?', id);
-}
+export const insertQueueItem = impl.insertQueueItem;
+export const listQueueItems = impl.listQueueItems;
+export const updateQueueItem = impl.updateQueueItem;
+export const removeQueueItem = impl.removeQueueItem;
