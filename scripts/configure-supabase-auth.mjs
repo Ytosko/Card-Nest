@@ -41,7 +41,7 @@ const templateFlowTypes = {
   confirmation: 'signup',
   recovery: 'recovery',
   'email-change': 'email_change',
-  'magic-link': 'magiclink',
+  'magic-link': 'email',
   invite: 'invite',
 };
 

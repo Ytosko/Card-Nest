@@ -1,5 +1,5 @@
-import * as Linking from 'expo-linking';
+import { getPublicEnv } from '@/src/config/env';
 
-export function getAuthCallbackUrl(flow: 'confirmation' | 'recovery' = 'confirmation') {
-  return Linking.createURL('auth/callback', { queryParams: { flow } });
+export function getAuthCallbackUrl(_flow: 'confirmation' | 'recovery' = 'confirmation') {
+  return getPublicEnv().EXPO_PUBLIC_AUTH_CALLBACK_URL;
 }

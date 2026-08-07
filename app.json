@@ -42,7 +42,25 @@
         }
       ],
       "expo-sqlite",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Card Nest to photograph business cards for your private library."
+        }
+      ],
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "Allow Card Nest to save selected business cards to your contacts."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Card Nest to choose business card and profile images from your library."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

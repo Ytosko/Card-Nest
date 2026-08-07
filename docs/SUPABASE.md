@@ -2,7 +2,7 @@
 
 ## Source of truth
 
-`supabase/migrations/20260807093836_initial_cardnest_schema.sql` is the initial hosted schema source of truth. The repository is linked to the configured Supabase project through ignored CLI state under `supabase/.temp/`.
+Forward migrations under `supabase/migrations/` are the hosted schema source of truth. The repository is linked to the configured Supabase project through ignored CLI state under `supabase/.temp/`.
 
 The migrations create:
 
@@ -14,6 +14,8 @@ The migrations create:
 - RLS policies for every user-owned table
 - a private `card-images` bucket with owner-folder policies
 - a public, admin-write-only `brand-assets` bucket for the supplied transactional-email logo
+- a private `profile-avatars` bucket and `profiles.avatar_path`
+- the authenticated `delete-account` Edge Function, which removes private objects before deleting the Auth user
 
 ## Storage contract
 
@@ -27,6 +29,8 @@ Object paths:
 ```
 
 Policies require the first path segment to equal `auth.uid()`. The bucket is limited to 12 MiB per object and approved business-card image MIME types. Signed URLs should be created only when an authenticated screen needs an image.
+
+Profile avatars use `{user_id}/avatar.jpg` in the private `profile-avatars` bucket with the same first-folder ownership rule and a 5 MiB limit.
 
 ## Applying migrations
 
@@ -52,7 +56,7 @@ npx supabase db lint --linked --level warning
 
 `db:types` writes `src/types/database.types.ts` as UTF-8 without a byte-order mark. `db:verify` checks that anonymous requests cannot retrieve cards and that the card image bucket is private without displaying credentials.
 
-Hosted authentication and Postmark configuration are documented in [Authentication](AUTHENTICATION.md). Use `npm run auth:configure`, `npm run auth:verify`, and `npm run auth:flow-verify`; none of these commands displays credentials.
+Hosted authentication and Postmark configuration are documented in [Authentication](AUTHENTICATION.md). Use `npm run auth:configure`, `npm run auth:verify`, `npm run auth:flow-verify`, and `npm run auth:production-verify`; none of these commands displays credentials or disposable test tokens.
 
 ## Security rules
 

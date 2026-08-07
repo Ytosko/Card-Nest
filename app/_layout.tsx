@@ -5,14 +5,14 @@ import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import 'react-native-reanimated';
 
 import { AppProviders } from '@/src/providers/app-providers';
+import { LaunchScreen } from '@/src/components/launch-screen';
 import { useAppTheme } from '@/src/theme/theme-provider';
 
 SplashScreen.preventAutoHideAsync();
-SplashScreen.setOptions({ duration: 250, fade: true });
 
 function RootNavigator() {
   const theme = useAppTheme();
@@ -43,6 +43,7 @@ function RootNavigator() {
 }
 
 export default function RootLayout() {
+  const [launchComplete, setLaunchComplete] = useState(false);
   const [fontsLoaded, fontError] = useFonts({
     OpenSans_400Regular,
     OpenSans_600SemiBold,
@@ -56,13 +57,15 @@ export default function RootLayout() {
     }
   }, [fontError, fontsLoaded]);
 
+  const finishLaunch = useCallback(() => setLaunchComplete(true), []);
+
   if (!fontsLoaded && !fontError) {
     return null;
   }
 
   return (
     <AppProviders>
-      <RootNavigator />
+      {launchComplete ? <RootNavigator /> : <LaunchScreen onFinish={finishLaunch} />}
     </AppProviders>
   );
 }

@@ -50,7 +50,7 @@ export default function AuthCallbackScreen() {
           beginRecovery();
           router.replace('/(auth)/reset-password');
         } else {
-          router.replace({ pathname: '/(app)/home', params: { confirmed: 'true' } });
+          router.replace({ pathname: '/(app)/(tabs)', params: { confirmed: 'true' } });
         }
       } catch (sessionError) {
         if (active) {

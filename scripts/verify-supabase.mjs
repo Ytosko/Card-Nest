@@ -37,17 +37,19 @@ if (anonymousCardsResponse.ok) {
   throw new Error(`Unexpected anonymous cards response: HTTP ${anonymousCardsResponse.status}.`);
 }
 
-const bucketResponse = await fetch(`${url}/storage/v1/bucket/card-images`, {
-  headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` },
-});
+for (const bucketId of ['card-images', 'profile-avatars']) {
+  const bucketResponse = await fetch(`${url}/storage/v1/bucket/${bucketId}`, {
+    headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` },
+  });
 
-if (!bucketResponse.ok) {
-  throw new Error(`Unable to verify private Storage bucket: HTTP ${bucketResponse.status}.`);
+  if (!bucketResponse.ok) {
+    throw new Error(`Unable to verify private Storage bucket ${bucketId}: HTTP ${bucketResponse.status}.`);
+  }
+
+  const bucket = await bucketResponse.json();
+  if (bucket.id !== bucketId || bucket.public !== false) {
+    throw new Error(`The ${bucketId} Storage bucket is missing or public.`);
+  }
 }
 
-const bucket = await bucketResponse.json();
-if (bucket.id !== 'card-images' || bucket.public !== false) {
-  throw new Error('The card-images Storage bucket is missing or public.');
-}
-
-console.log('Remote verification passed: anonymous card data is unavailable and card-images is private.');
+console.log('Remote verification passed: anonymous card data is unavailable and both user-media buckets are private.');

@@ -8,7 +8,7 @@ The mobile app uses Expo and strict TypeScript. Supabase is the hosted cloud sou
 
 ### Mobile app
 
-The repository root is the Expo SDK 54 application for Android, iOS, Expo Go, and development web previews. It contains the authenticated mobile experience and future capture, card-library, offline, AI, and contact-export work.
+The repository root is the Expo SDK 54 application for Android, iOS, Expo Go, and development web previews. It contains the authenticated product, camera capture, card library, offline queue, BYOK AI extraction, and contact export.
 
 ### Production website
 
@@ -20,7 +20,7 @@ The repository root is the Expo SDK 54 application for Android, iOS, Expo Go, an
 
 ## Current implementation status
 
-Phase 1 (foundation), Phase 2 (Supabase), and Phase 3 (authentication) are implemented:
+The Card Nest v1 implementation now includes:
 
 - Expo SDK 54 and Expo Go-compatible foundation
 - Card Nest branding, generated platform assets, light/dark tokens, and accessible UI primitives
@@ -29,13 +29,19 @@ Phase 1 (foundation), Phase 2 (Supabase), and Phase 3 (authentication) are imple
 - linked Supabase project with repository-owned migration history
 - normalized card schema, search indexes, ownership constraints, RLS, and private card-image Storage
 - generated TypeScript database types and typed Supabase client
-- production-ready Card Nest sign-up, sign-in, confirmation, recovery, account, and sign-out journeys
+- production-ready Card Nest sign-up, sign-in, confirmation, recovery, secure email change, profile, account deletion, and sign-out journeys
 - persistent native/web sessions with guarded routing and confirmation/recovery deep links
 - Postmark custom SMTP and five hosted Card Nest transactional-email templates
-- user profile provisioning and editing protected by owner RLS
+- first-party production auth verification through `cardnest.ytosko.dev`, with token removal before verification
+- animated reduced-motion-aware launch, onboarding, five-tab dashboard, profile photos, and settings
+- card CRUD, full-text search, filters, favorites, tags, private-image restore, duplicate merge/keep-separate, copy/share/call/email actions
+- front/back camera or gallery capture, compression, durable SQLite queue, reconnect/restart recovery, private Storage upload, and retry status
+- device-only OpenAI/Gemini keys, dynamic provider model discovery, schema-validated multimodal extraction, and editable review
+- single and selected bulk native Contacts export
+- user profile provisioning, private avatars, and server-side account deletion protected by owner RLS
 - unit, type, lint, remote schema, and Storage checks
 
-The card library and product journeys continue in Phase 4. See [the implementation plan](docs/IMPLEMENTATION_PLAN.md).
+Real-device and store-release validation remain tracked in [the release checklist](docs/RELEASE_CHECKLIST.md). See [the implementation plan](docs/IMPLEMENTATION_PLAN.md) for delivered phases.
 
 ## Requirements
 
@@ -113,6 +119,7 @@ npm run db:verify
 npm run auth:verify
 npm run auth:flow-verify
 npm run auth:web-flow-verify
+npm run auth:production-verify
 npm run web:check
 ```
 
@@ -147,7 +154,7 @@ npm run assets:brand
 
 - `.env` and local Supabase state are ignored by Git.
 - Server/admin credentials are tooling-only and never imported by Expo code.
-- User OpenAI/Gemini API keys will be stored only in Expo SecureStore.
+- User OpenAI/Gemini API keys are stored only in Expo SecureStore and never synchronized.
 - The mobile app uses a public Supabase key; authorization is enforced with RLS.
 - Original card images are private and stored under owner-prefixed object paths.
 

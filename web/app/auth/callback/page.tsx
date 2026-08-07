@@ -46,6 +46,9 @@ export default function AuthCallbackPage() {
     async function verifyLink() {
       const search = new URLSearchParams(window.location.search);
       const hash = new URLSearchParams(window.location.hash.replace(/^#/u, ''));
+      // One-time hashes, session fragments, and provider errors are never kept
+      // in browser history, including when the incoming link is malformed.
+      window.history.replaceState({}, '', '/auth/callback');
       const suppliedError =
         search.get('error_description') ??
         search.get('error') ??
@@ -83,7 +86,6 @@ export default function AuthCallbackPage() {
         }
 
         const nextAppLink = createAppLink(response);
-        window.history.replaceState({}, '', '/auth/callback');
         setAppLink(nextAppLink);
         setState('success');
         setMessage(`${flowMessages[response.flowType] ?? 'Your secure link is verified.'} Opening the Card Nest app…`);

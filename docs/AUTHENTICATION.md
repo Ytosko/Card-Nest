@@ -1,63 +1,60 @@
 # Card Nest authentication
 
-Phase 3 uses Supabase Auth with email/password accounts, mandatory email confirmation, password recovery, persistent sessions, and a user-owned `profiles` row.
+Card Nest uses Supabase Auth with email/password accounts, mandatory confirmation, password recovery, secure email change, persistent sessions, and user-owned profiles.
 
 ## App routes
 
-- `/sign-in` — password sign-in with confirmation-aware error routing
+- `/sign-in` — password sign-in with confirmation-aware errors
 - `/sign-up` — account creation with optional display name
 - `/verify-email` — confirmation waiting state and resend action
 - `/forgot-password` — enumeration-safe reset request
-- `/auth/callback` — confirmation/recovery deep-link exchange for implicit and PKCE-style links
+- `/auth/callback` — confirmation/recovery deep-link handoff
 - `/reset-password` — authenticated recovery session and password update
-- `/home` — authenticated app entry
-- `/account` — profile editing and sign-out
+- `/(app)/(tabs)/index` — authenticated dashboard entry
+- `/profile` — photo/details, secure email change, sign-out, and account deletion
 
-The `AuthProvider` initializes from the persisted Supabase session, listens for auth state changes, refreshes the matching profile, and exposes signed-in state to route guards. Native builds use Expo SQLite-backed local storage. Web uses browser local storage and an in-memory fallback during static rendering.
+`AuthProvider` restores the persisted Supabase session, listens for auth events, refreshes the matching profile, and supplies guarded route state. Native builds use Expo SQLite-backed local storage. Web uses browser local storage with an in-memory static-render fallback.
 
-## Deep links
+## First-party links
 
-The stable production scheme is:
+The stable production scheme is `cardnest://auth/callback`. The public web callback and hosted Site URL are both `https://cardnest.ytosko.dev/auth/callback` / `https://cardnest.ytosko.dev`.
 
-```text
-cardnest://auth/callback
-```
+Every transactional email links directly to the Card Nest domain with a one-time token hash. The page removes the token from browser history before making a same-origin POST to `/api/auth/verify`. That server route verifies with the public anon/publishable key; the browser is never navigated to a Supabase hostname. A returned session is handed to the installed app through the custom scheme. Recovery sessions continue to the reset-password screen.
 
-The hosted web callback is `https://cardnest.ytosko.dev/auth/callback`, and the hosted Supabase Site URL is `https://cardnest.ytosko.dev`. Every transactional email links to this Card Nest URL with a one-time token hash. The callback posts that hash to a same-origin server endpoint, which verifies it with Supabase using only the public anon/publishable key. The browser is never redirected to a Supabase domain.
+Expired, already-used, malformed, rate-limited, and temporarily unavailable links stay on the branded Card Nest page with safe messages. Email-change approvals may return no session; the app opens normally and restores any existing session.
 
-After successful verification, the callback removes the token hash from the browser address bar and hands the returned session to the mobile app through `cardnest://auth/callback`. Recovery sessions continue to the in-app reset-password screen. Expired, already-used, malformed, rate-limited, and temporarily unavailable links stay on the branded Card Nest page with a safe error message.
-
-`Linking.createURL()` is used at runtime so Expo Go receives its current LAN callback URL. Hosted Auth allows the Card Nest scheme, Expo Go callbacks, and local web callback ports. Production and development builds should continue using the stable `cardnest` scheme configured in `app.json`.
+`Linking.createURL()` supplies the active Expo Go callback in development. Hosted Auth allows the stable Card Nest scheme, Expo Go callbacks, the production web callback, and documented local callback ports.
 
 ## Hosted Auth and Postmark
 
-All server credentials remain in ignored `.env` values and are read only by local tooling. They are never imported by `app/` or `src/` application code.
+All server credentials remain in ignored `.env` values and are read only by tooling. They are never imported by mobile or web application code.
 
 The hosted configuration enables:
 
-- email/password sign-up with email confirmation
+- email/password sign-up with confirmation
 - secure double confirmation for email changes
 - minimum 8-character passwords
-- Postmark-backed custom SMTP
+- Postmark-backed custom SMTP with Card Nest sender name
 - Card Nest callback allow-list entries
 - branded confirmation, recovery, email-change, magic-link, and invite templates
 
-The templates are repository-owned under `supabase/templates/`. A public `brand-assets` Storage bucket contains only the supplied Card Nest email logo; original business-card images remain in the private `card-images` bucket.
-
-Apply and verify hosted configuration without displaying secrets:
+Templates are repository-owned under `supabase/templates/`. The public `brand-assets` bucket contains only the supplied email logo; original card images and profile avatars remain private.
 
 ```bash
 npm run auth:configure
 npm run auth:verify
 npm run auth:flow-verify
 npm run auth:web-flow-verify
+npm run auth:production-verify
 npm run security:verify-bundle
 ```
 
-`auth:verify` checks the Postmark server token, hosted SMTP metadata, callback allow list, confirmation setting, and exact first-party template contents. `auth:flow-verify` creates and removes a disposable non-deliverable test account to verify confirmation enforcement, password sign-in, token issuance, profile provisioning/RLS, profile updates, and sign-out without sending an email. With a production web server running locally on port 3100, `auth:web-flow-verify` generates a real one-time signup token without sending email, verifies it through the Card Nest server endpoint, confirms token reuse is rejected, and removes the disposable account.
+`auth:verify` checks SMTP metadata, redirects, confirmation settings, and exact first-party template contents. `auth:flow-verify` tests session/profile behavior with a disposable account. `auth:web-flow-verify` tests the local production callback bridge.
 
-After `npx expo export --platform web`, `security:verify-bundle` scans the generated output for the configured server-role, database, SMTP, and Postmark values and reports only credential names if a leak is ever detected.
+`auth:production-verify` exercises signup, recovery, magic link, invitation, malformed/reused tokens, and secure two-address email change against the live Card Nest domain. Email-change messages use Postmark's documented black-hole test address and are read through its server API; the script never prints recipients, token hashes, sessions, or credentials.
 
-## Email deliverability note
+After `npx expo export --platform web`, `security:verify-bundle` scans generated output for configured service-role, database, SMTP, and Postmark values and reports only credential names if a leak is detected.
 
-Postmark link tracking should remain disabled for authentication emails because rewritten confirmation links can break Supabase verification. DKIM, SPF, DMARC, sender-domain approval, and production inbox placement are Postmark/domain concerns and should be rechecked before a public launch.
+## Deliverability
+
+Postmark link tracking must remain disabled for authentication emails because rewritten links can break verification. DKIM, SPF, DMARC, sender-domain approval, and production inbox placement should be checked before public release.

@@ -10,6 +10,9 @@ const publicEnvSchema = z.object({
     message: 'must use HTTPS',
   }),
   EXPO_PUBLIC_SUPABASE_ANON_KEY: z.string().min(20),
+  EXPO_PUBLIC_AUTH_CALLBACK_URL: z.string().url().refine((value) => value.startsWith('https://'), {
+    message: 'must use HTTPS',
+  }).default('https://cardnest.ytosko.dev/auth/callback'),
   EXPO_PUBLIC_SUPPORT_EMAIL: z.string().trim().optional().default(''),
   EXPO_PUBLIC_PRIVACY_URL: optionalUrl.optional().default(''),
   EXPO_PUBLIC_TERMS_URL: optionalUrl.optional().default(''),
@@ -27,6 +30,7 @@ const publicEnvSource = {
   EXPO_PUBLIC_APP_SCHEME: process.env.EXPO_PUBLIC_APP_SCHEME,
   EXPO_PUBLIC_SUPABASE_URL: process.env.EXPO_PUBLIC_SUPABASE_URL,
   EXPO_PUBLIC_SUPABASE_ANON_KEY: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY,
+  EXPO_PUBLIC_AUTH_CALLBACK_URL: process.env.EXPO_PUBLIC_AUTH_CALLBACK_URL,
   EXPO_PUBLIC_SUPPORT_EMAIL: process.env.EXPO_PUBLIC_SUPPORT_EMAIL,
   EXPO_PUBLIC_PRIVACY_URL: process.env.EXPO_PUBLIC_PRIVACY_URL,
   EXPO_PUBLIC_TERMS_URL: process.env.EXPO_PUBLIC_TERMS_URL,

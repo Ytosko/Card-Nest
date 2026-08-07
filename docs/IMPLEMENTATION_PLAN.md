@@ -46,15 +46,15 @@ This plan follows `HANDOFF.md`, which is the product and engineering source of t
 5. Publish the supplied logo as a read-only transactional-email asset while keeping original card images private.
 6. Verify hosted confirmation enforcement, password auth, session issuance, profile provisioning/RLS, profile updates, sign-out, and configuration drift.
 
-## Later phases
+## Phases 4-10 — Product v1
 
-- Phase 4: card library, details, editing, deletion, pagination, and search.
-- Phase 5: camera capture, image preparation, durable offline queue, upload, and sync status.
-- Phase 6: SecureStore BYOK settings, dynamic provider models, schema-constrained extraction, and review.
-- Phase 7: duplicate scoring and explicit merge/keep-both UX.
-- Phase 8: single and bulk native Contacts export with progress and duplicate awareness.
-- Phase 9: retry recovery, poor-network behavior, and conflict handling.
-- Phase 10: accessibility, performance, release polish, privacy, and device verification.
+- Phase 4 delivered card CRUD, details, search, filters, favorites, tags, private images, sharing, and contact actions.
+- Phase 5 delivered camera/gallery capture, compression, durable SQLite queue, private upload, reconnect/restart recovery, and sync status.
+- Phase 6 delivered SecureStore BYOK settings, dynamic OpenAI/Gemini models, schema-constrained multimodal extraction, and editable review.
+- Phase 7 delivered normalized duplicate scoring and explicit merge/keep-separate UX.
+- Phase 8 delivered single and selected bulk native Contacts export with permission and result handling.
+- Phase 9 delivered exponential retry with jitter, explicit retry, cloud restoration, and durable failure states.
+- Phase 10 delivered custom launch/onboarding, reduced motion, light/dark tokens, accessible states, profile avatars, account deletion, and product-access gates. Physical-device and store-release checks remain in `RELEASE_CHECKLIST.md`.
 
 ## Phase completion gates
 
