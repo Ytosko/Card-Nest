@@ -167,6 +167,8 @@ export type Database = {
           label: string
           normalized_phone: string | null
           phone_number: string
+          service: string | null
+          service_label: string | null
           user_id: string
         }
         Insert: {
@@ -177,6 +179,8 @@ export type Database = {
           label?: string
           normalized_phone?: string | null
           phone_number: string
+          service?: string | null
+          service_label?: string | null
           user_id: string
         }
         Update: {
@@ -187,6 +191,8 @@ export type Database = {
           label?: string
           normalized_phone?: string | null
           phone_number?: string
+          service?: string | null
+          service_label?: string | null
           user_id?: string
         }
         Relationships: [

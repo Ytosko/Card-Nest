@@ -21,6 +21,7 @@ import { AppButton } from '@/src/components/ui/app-button';
 import { AppText } from '@/src/components/ui/app-text';
 import { ContactAvatar } from '@/src/components/ui/contact-avatar';
 import { AuthNotice } from '@/src/features/auth/components/auth-notice';
+import { KNOWN_SERVICES } from '@/src/features/cards/card-schema';
 import { useCard, cardKeys } from '@/src/features/cards/card-hooks';
 import {
   deleteCard,
@@ -190,11 +191,20 @@ export default function CardDetailScreen() {
     setTimeout(() => setToastMessage(null), 2500);
   }
 
+  function openAppService(service: string, phone: string) {
+    const digits = phone.replace(/[^\d+]/g, '');
+    if (service === 'whatsapp') {
+      void Linking.openURL(`https://wa.me/${digits.replace('+', '')}`);
+    } else if (service === 'telegram') {
+      void Linking.openURL(`https://t.me/${digits.startsWith('+') ? digits : '+' + digits}`);
+    }
+  }
+
   const phoneNumbers =
     person.card_phone_numbers?.length > 0
       ? person.card_phone_numbers
       : person.primary_phone
-      ? [{ id: 'primary', phone_number: person.primary_phone, label: 'Mobile', is_primary: true }]
+      ? [{ id: 'primary', phone_number: person.primary_phone, label: 'Mobile', service: null, service_label: null, is_primary: true }]
       : [];
 
   const emails =
@@ -330,38 +340,70 @@ export default function CardDetailScreen() {
           />
         </View>
 
-        {/* Structured Contact Details — Support ALL Phone Numbers */}
-        <Section title="Phone Numbers">
+        {/* Structured Contact Details — Support ALL Phone Numbers & App Services */}
+        <Section title="Phone Numbers & App Services">
           {phoneNumbers.length > 0 ? (
-            phoneNumbers.map((p, idx) => (
-              <View key={p.id || idx} style={styles.multiRow}>
-                <MaterialCommunityIcons color={theme.colors.primary} name="phone-outline" size={21} />
-                <View style={styles.detailCopy}>
-                  <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
-                    <AppText muted variant="caption">
-                      {p.label || 'Phone'}
-                    </AppText>
-                    {p.is_primary ? (
-                      <AppText variant="caption" style={{ color: theme.colors.primary, fontWeight: '700' }}>
-                        (Primary)
+            phoneNumbers.map((p, idx) => {
+              const knownSrv = KNOWN_SERVICES.find((s) => s.key === p.service);
+              const serviceName = p.service_label || knownSrv?.name;
+
+              return (
+                <View key={p.id || idx} style={styles.multiRow}>
+                  <MaterialCommunityIcons color={theme.colors.primary} name={(knownSrv?.icon as any) || 'phone-outline'} size={21} />
+                  <View style={styles.detailCopy}>
+                    <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <AppText muted variant="caption">
+                        {p.label || 'Phone'}
                       </AppText>
-                    ) : null}
+
+                      {serviceName ? (
+                        <View style={[styles.serviceBadge, { backgroundColor: theme.colors.primarySoft }]}>
+                          <AppText variant="caption" style={{ color: theme.colors.primary, fontWeight: '700', fontSize: 10 }}>
+                            {serviceName}
+                          </AppText>
+                        </View>
+                      ) : null}
+
+                      {p.is_primary ? (
+                        <AppText variant="caption" style={{ color: theme.colors.primary, fontWeight: '700', fontSize: 10 }}>
+                          (Primary)
+                        </AppText>
+                      ) : null}
+                    </View>
+                    <AppText style={{ color: theme.colors.primary, fontSize: 16 }}>{p.phone_number}</AppText>
                   </View>
-                  <AppText style={{ color: theme.colors.primary, fontSize: 16 }}>{p.phone_number}</AppText>
+
+                  <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+                    {/* Deep link action for WhatsApp */}
+                    {p.service === 'whatsapp' ? (
+                      <Pressable accessibilityLabel="Open WhatsApp" hitSlop={6} onPress={() => openAppService('whatsapp', p.phone_number)}>
+                        <MaterialCommunityIcons color="#25D366" name="whatsapp" size={22} />
+                      </Pressable>
+                    ) : null}
+
+                    {/* Deep link action for Telegram */}
+                    {p.service === 'telegram' ? (
+                      <Pressable accessibilityLabel="Open Telegram" hitSlop={6} onPress={() => openAppService('telegram', p.phone_number)}>
+                        <MaterialCommunityIcons color="#0088cc" name={"send" as any} size={22} />
+                      </Pressable>
+                    ) : null}
+
+                    <Pressable accessibilityLabel="Call" hitSlop={6} onPress={() => void Linking.openURL(`tel:${p.phone_number}`)}>
+                      <MaterialCommunityIcons color={theme.colors.primary} name="phone" size={20} />
+                    </Pressable>
+                    <Pressable accessibilityLabel="SMS" hitSlop={6} onPress={() => void Linking.openURL(`sms:${p.phone_number}`)}>
+                      <MaterialCommunityIcons color={theme.colors.primary} name="message-text-outline" size={20} />
+                    </Pressable>
+                    <Pressable
+                      accessibilityLabel={`Copy ${serviceName || p.label || 'phone'}`}
+                      hitSlop={6}
+                      onPress={() => copyValue(serviceName ? `${serviceName} (${p.phone_number})` : p.label || 'Phone', p.phone_number)}>
+                      <MaterialCommunityIcons color={theme.colors.textMuted} name="content-copy" size={18} />
+                    </Pressable>
+                  </View>
                 </View>
-                <View style={{ flexDirection: 'row', gap: 8 }}>
-                  <Pressable accessibilityLabel="Call" hitSlop={6} onPress={() => void Linking.openURL(`tel:${p.phone_number}`)}>
-                    <MaterialCommunityIcons color={theme.colors.primary} name="phone" size={20} />
-                  </Pressable>
-                  <Pressable accessibilityLabel="SMS" hitSlop={6} onPress={() => void Linking.openURL(`sms:${p.phone_number}`)}>
-                    <MaterialCommunityIcons color={theme.colors.primary} name="message-text-outline" size={20} />
-                  </Pressable>
-                  <Pressable accessibilityLabel="Copy phone" hitSlop={6} onPress={() => copyValue(p.label || 'Phone', p.phone_number)}>
-                    <MaterialCommunityIcons color={theme.colors.textMuted} name="content-copy" size={18} />
-                  </Pressable>
-                </View>
-              </View>
-            ))
+              );
+            })
           ) : (
             <AppText muted variant="caption">No phone number recorded</AppText>
           )}
@@ -645,4 +687,9 @@ const styles = StyleSheet.create({
   quickActions: { flexDirection: 'row', gap: 8 },
   safeArea: { flex: 1 },
   section: { borderWidth: 1 },
+  serviceBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
 });

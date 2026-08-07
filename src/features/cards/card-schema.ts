@@ -13,11 +13,28 @@ export const phoneItemSchema = z.object({
   id: z.string().optional(),
   phone: z.string().trim().default(''),
   label: z.string().trim().default('Mobile'),
+  service: z.string().trim().default(''),
+  serviceLabel: z.string().trim().default(''),
   isPrimary: z.boolean().default(false),
 });
 
 export type EmailItem = z.infer<typeof emailItemSchema>;
 export type PhoneItem = z.infer<typeof phoneItemSchema>;
+
+export const KNOWN_SERVICES = [
+  { key: 'whatsapp', name: 'WhatsApp', icon: 'whatsapp' },
+  { key: 'imo', name: 'IMO', icon: 'chat-outline' },
+  { key: 'bkash', name: 'bKash', icon: 'cash-fast' },
+  { key: 'telegram', name: 'Telegram', icon: 'telegram' },
+  { key: 'nagad', name: 'Nagad', icon: 'wallet-outline' },
+  { key: 'rocket', name: 'Rocket', icon: 'rocket-launch-outline' },
+  { key: 'viber', name: 'Viber', icon: 'phone-classic' },
+  { key: 'line', name: 'LINE', icon: 'chat' },
+  { key: 'wechat', name: 'WeChat', icon: 'wechat' },
+  { key: 'signal', name: 'Signal', icon: 'shield-check-outline' },
+  { key: 'messenger', name: 'Messenger', icon: 'facebook-messenger' },
+  { key: 'other', name: 'Other Service', icon: 'dots-horizontal' },
+] as const;
 
 export const cardDraftSchema = z
   .object({
@@ -62,7 +79,7 @@ export const emptyCardDraft: CardDraft = {
   phone: '',
   fax: '',
   emails: [{ email: '', label: 'Work', isPrimary: true }],
-  phones: [{ phone: '', label: 'Mobile', isPrimary: true }],
+  phones: [{ phone: '', label: 'Mobile', service: '', serviceLabel: '', isPrimary: true }],
   website: '',
   addressLine1: '',
   addressLine2: '',

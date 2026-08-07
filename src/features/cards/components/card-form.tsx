@@ -10,7 +10,13 @@ import { AuthNotice } from '@/src/features/auth/components/auth-notice';
 import { uploadContactPhoto, removeContactPhoto } from '@/src/features/cards/card-service';
 import { useAppTheme } from '@/src/theme/theme-provider';
 
-import { cardDraftSchema, type CardDraft, type EmailItem, type PhoneItem } from '../card-schema';
+import {
+  cardDraftSchema,
+  KNOWN_SERVICES,
+  type CardDraft,
+  type EmailItem,
+  type PhoneItem,
+} from '../card-schema';
 
 const PHONE_LABELS = ['Mobile', 'Work', 'Office', 'Direct', 'Landline', 'Fax', 'Other'];
 const EMAIL_LABELS = ['Work', 'Personal', 'Other'];
@@ -46,7 +52,7 @@ export function CardForm({
   // Multi-phone helpers
   const phones: PhoneItem[] = draft.phones?.length
     ? draft.phones
-    : [{ phone: draft.phone || '', label: 'Mobile', isPrimary: true }];
+    : [{ phone: draft.phone || '', label: 'Mobile', service: '', serviceLabel: '', isPrimary: true }];
 
   function updatePhone(index: number, key: keyof PhoneItem, val: any) {
     const next = [...phones];
@@ -57,13 +63,22 @@ export function CardForm({
     } else {
       (next[index] as any)[key] = val;
     }
+
+    // Auto sync serviceLabel when service key changes
+    if (key === 'service' && val) {
+      const known = KNOWN_SERVICES.find((s) => s.key === val);
+      if (known && val !== 'other') {
+        next[index].serviceLabel = known.name;
+      }
+    }
+
     setDraft((cur) => ({ ...cur, phones: next, phone: next.find((p) => p.isPrimary)?.phone || next[0]?.phone || '' }));
   }
 
   function addPhone() {
     setDraft((cur) => ({
       ...cur,
-      phones: [...phones, { phone: '', label: 'Work', isPrimary: phones.length === 0 }],
+      phones: [...phones, { phone: '', label: 'Work', service: '', serviceLabel: '', isPrimary: phones.length === 0 }],
     }));
   }
 
@@ -226,8 +241,8 @@ export function CardForm({
           <AppTextField autoCapitalize="words" label="Department" onChangeText={set('department')} value={draft.department} />
         </FormSection>
 
-        {/* 3. MULTIPLE Phone Numbers */}
-        <FormSection badge="3" icon="phone-outline" title="Phone Numbers (Multiple Supported)">
+        {/* 3. MULTIPLE Phone Numbers with Service Detection */}
+        <FormSection badge="3" icon="phone-outline" title="Phone Numbers & App Services">
           {phones.map((p, idx) => (
             <View key={idx} style={[styles.itemCard, { backgroundColor: theme.colors.background, borderColor: theme.colors.border }]}>
               <View style={styles.itemHeader}>
@@ -253,10 +268,11 @@ export function CardForm({
                 keyboardType="phone-pad"
                 label={`Phone Number ${idx + 1}`}
                 onChangeText={(text) => updatePhone(idx, 'phone', text)}
-                placeholder="+1 555-0199"
+                placeholder="+1 555-0199 or 01712..."
                 value={p.phone}
               />
 
+              {/* Label selector */}
               <View style={styles.labelsRow}>
                 <AppText muted variant="caption">Label:</AppText>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
@@ -278,6 +294,60 @@ export function CardForm({
                   ))}
                 </ScrollView>
               </View>
+
+              {/* Service selector (Messaging & Payment App) */}
+              <View style={styles.labelsRow}>
+                <AppText muted variant="caption">App/Service:</AppText>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                  <Pressable
+                    onPress={() => {
+                      updatePhone(idx, 'service', '');
+                      updatePhone(idx, 'serviceLabel', '');
+                    }}
+                    style={[
+                      styles.chipOption,
+                      {
+                        backgroundColor: !p.service ? theme.colors.primarySoft : theme.colors.surface,
+                        borderColor: !p.service ? theme.colors.primary : theme.colors.border,
+                      },
+                    ]}>
+                    <AppText variant="caption" style={{ color: !p.service ? theme.colors.primary : theme.colors.text }}>
+                      None
+                    </AppText>
+                  </Pressable>
+
+                  {KNOWN_SERVICES.map((srv) => (
+                    <Pressable
+                      key={srv.key}
+                      onPress={() => updatePhone(idx, 'service', srv.key)}
+                      style={[
+                        styles.chipOption,
+                        {
+                          backgroundColor: p.service === srv.key ? theme.colors.primarySoft : theme.colors.surface,
+                          borderColor: p.service === srv.key ? theme.colors.primary : theme.colors.border,
+                        },
+                      ]}>
+                      <MaterialCommunityIcons
+                        color={p.service === srv.key ? theme.colors.primary : theme.colors.textMuted}
+                        name={srv.icon as any}
+                        size={14}
+                      />
+                      <AppText variant="caption" style={{ color: p.service === srv.key ? theme.colors.primary : theme.colors.text }}>
+                        {srv.name}
+                      </AppText>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              </View>
+
+              {p.service === 'other' ? (
+                <AppTextField
+                  label="Custom Service Name"
+                  onChangeText={(text) => updatePhone(idx, 'serviceLabel', text)}
+                  placeholder="e.g. Upay, CellFin, Skype"
+                  value={p.serviceLabel}
+                />
+              ) : null}
             </View>
           ))}
 
@@ -458,8 +528,11 @@ const styles = StyleSheet.create({
     width: 22,
   },
   chipOption: {
+    alignItems: 'center',
     borderRadius: 999,
     borderWidth: 1,
+    flexDirection: 'row',
+    gap: 4,
     paddingHorizontal: 10,
     paddingVertical: 4,
   },

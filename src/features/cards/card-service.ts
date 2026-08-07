@@ -152,6 +152,8 @@ async function syncPrimaryRelations(cardId: string, userId: string, draft: CardD
           card_id: cardId,
           phone_number: p.phone.trim(),
           label: p.label?.trim() || 'Mobile',
+          service: p.service?.trim() || null,
+          service_label: p.serviceLabel?.trim() || null,
           is_primary: Boolean(p.isPrimary),
         })
       );
@@ -368,11 +370,13 @@ export function draftFromCard(card: CardWithRelations | Card): CardDraft {
           id: p.id,
           phone: p.phone_number,
           label: p.label ?? 'Mobile',
+          service: p.service ?? '',
+          serviceLabel: p.service_label ?? '',
           isPrimary: p.is_primary ?? false,
         }))
       : card.primary_phone
-      ? [{ phone: card.primary_phone, label: 'Mobile', isPrimary: true }]
-      : [{ phone: '', label: 'Mobile', isPrimary: true }];
+      ? [{ phone: card.primary_phone, label: 'Mobile', service: '', serviceLabel: '', isPrimary: true }]
+      : [{ phone: '', label: 'Mobile', service: '', serviceLabel: '', isPrimary: true }];
 
   return {
     firstName: card.first_name ?? '',
