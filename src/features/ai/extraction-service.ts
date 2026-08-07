@@ -1,4 +1,4 @@
-import { getProviderKey, extractBusinessCard, type AiProvider } from '@/src/features/ai/ai-provider';
+import { getProviderKey, getServerCredentialStatus, extractBusinessCard, type AiProvider } from '@/src/features/ai/ai-provider';
 import { duplicateScore } from '@/src/features/cards/duplicate-score';
 import { supabase } from '@/src/lib/supabase/client';
 
@@ -13,13 +13,17 @@ export async function runConfiguredExtraction(cardId: string, userId: string, im
 
   const provider = preference?.selected_ai_provider as AiProvider | null;
   const model = preference?.selected_ai_model;
-  const key = provider ? await getProviderKey(provider) : null;
+  const localKey = provider ? await getProviderKey(provider) : null;
 
-  if (!provider || !model || !key) {
+  // Check server credential status if local key is not available
+  const serverStatus = provider ? await getServerCredentialStatus() : {};
+  const hasServerKey = provider ? Boolean(serverStatus[provider]?.hasKey) : false;
+
+  if (!provider || !model || (!localKey && !hasServerKey)) {
     const reason = !provider || !model
       ? 'Configure your OpenAI or Gemini provider and model in Settings > AI.'
       : 'Provide your API key in Settings > AI to enable extraction.';
-    
+
     await supabase.from('cards').update({
       status: 'review',
       extraction_quality: { failed: true, error: reason },
@@ -49,7 +53,7 @@ export async function runConfiguredExtraction(cardId: string, userId: string, im
       .update({ status: 'processing', extraction_provider: provider, extraction_model: model })
       .eq('id', cardId);
 
-    const extracted = await extractBusinessCard(provider, model, key, imageUris);
+    const extracted = await extractBusinessCard(provider, model, localKey, imageUris);
 
     const values = {
       display_name:

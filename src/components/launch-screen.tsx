@@ -8,8 +8,6 @@ import Animated, {
   useAnimatedStyle,
   useSharedValue,
   withDelay,
-  withRepeat,
-  withSequence,
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
@@ -21,11 +19,10 @@ export function LaunchScreen({ onFinish }: { onFinish: () => void }) {
   const theme = useAppTheme();
   const [reduceMotion, setReduceMotion] = useState(false);
 
-  // Animation values
-  const entrance = useSharedValue(0);
-  const logoSpring = useSharedValue(0);
-  const idle = useSharedValue(0);
-  const glow = useSharedValue(0);
+  // Core animation progress shared values
+  const progress = useSharedValue(0); // 0.0 -> 1.0 main progression
+  const beamY = useSharedValue(0); // 0 -> 138 vertical scan sweep
+  const logoSpring = useSharedValue(0); // 0 -> 1 logo mark morph settle
 
   useEffect(() => {
     let mounted = true;
@@ -35,61 +32,40 @@ export function LaunchScreen({ onFinish }: { onFinish: () => void }) {
       setReduceMotion(enabled);
 
       if (enabled) {
-        // Fast, subtle fade for reduced motion preference
-        entrance.value = withTiming(1, { duration: 350 }, (finished) => {
+        // Fast, clean static fade for reduced motion
+        progress.value = withTiming(1, { duration: 350 }, (finished) => {
           if (finished && mounted) {
             runOnJS(onFinish)();
           }
         });
       } else {
-        // Full springy nest animation (1.6 - 1.8s)
-        entrance.value = withTiming(1, {
-          duration: 1600,
+        // Main sequence duration ~1.65 seconds: Scan -> Intelligence -> Card Nest
+        progress.value = withTiming(1, {
+          duration: 1650,
           easing: Easing.out(Easing.cubic),
         });
 
-        // Logo spring entry with soft overshoot and wobble
+        // Beam sweep top to bottom across 138px card height
+        beamY.value = withDelay(
+          300,
+          withTiming(1, { duration: 750, easing: Easing.inOut(Easing.quad) })
+        );
+
+        // Logo spring morph
         logoSpring.value = withDelay(
-          180,
+          1100,
           withSpring(1, {
-            damping: 11,
-            stiffness: 90,
-            mass: 0.9,
+            damping: 14,
+            stiffness: 110,
+            mass: 0.8,
           })
         );
 
-        // Cyan glow pulsing behind nest center
-        glow.value = withDelay(
-          300,
-          withRepeat(
-            withSequence(
-              withTiming(1, { duration: 1200, easing: Easing.inOut(Easing.quad) }),
-              withTiming(0.4, { duration: 1200, easing: Easing.inOut(Easing.quad) })
-            ),
-            -1,
-            true
-          )
-        );
-
-        // Subtle living idle motion after convergence
-        idle.value = withDelay(
-          1200,
-          withRepeat(
-            withSequence(
-              withTiming(1, { duration: 2000, easing: Easing.inOut(Easing.quad) }),
-              withTiming(0, { duration: 2000, easing: Easing.inOut(Easing.quad) })
-            ),
-            -1,
-            true
-          )
-        );
-
-        // Trigger finish callback once initial spring settles
         const timer = setTimeout(() => {
           if (mounted) {
             onFinish();
           }
-        }, 1800);
+        }, 1750);
 
         return () => clearTimeout(timer);
       }
@@ -98,105 +74,65 @@ export function LaunchScreen({ onFinish }: { onFinish: () => void }) {
     return () => {
       mounted = false;
     };
-  }, [entrance, glow, idle, logoSpring, onFinish]);
+  }, [beamY, logoSpring, onFinish, progress]);
 
-  // Animated styles for nest cards floating in from corners
-  const cardTopLeftStyle = useAnimatedStyle(() => {
-    if (reduceMotion) return { opacity: entrance.value };
-    const p = entrance.value;
-    const idleY = interpolate(idle.value, [0, 1], [0, -4]);
+  // Card outline entry style
+  const cardFrameStyle = useAnimatedStyle(() => {
+    if (reduceMotion) return { opacity: 0 };
+    const p = progress.value;
+    const morph = logoSpring.value;
     return {
-      opacity: interpolate(p, [0, 0.4, 1], [0, 0.8, 0.9]),
+      opacity: interpolate(p, [0, 0.2, 0.95, 1.0], [0, 1, 0.8, 0]),
       transform: [
-        { translateX: interpolate(p, [0, 1], [-130, -32]) },
-        { translateY: interpolate(p, [0, 1], [-110, -26]) + idleY },
-        { rotate: `${interpolate(p, [0, 1], [-32, -14])}deg` },
-        { scale: interpolate(p, [0, 1], [0.6, 0.96]) },
+        { scale: interpolate(morph, [0, 1], [interpolate(p, [0, 0.2], [0.94, 1.0]), 0.45]) },
+        { translateY: interpolate(morph, [0, 1], [0, -18]) },
       ],
     };
   });
 
-  const cardTopRightStyle = useAnimatedStyle(() => {
-    if (reduceMotion) return { opacity: entrance.value };
-    const p = entrance.value;
-    const idleY = interpolate(idle.value, [0, 1], [0, 5]);
+  // Vertical cyan scanning laser beam style
+  const scanBeamStyle = useAnimatedStyle(() => {
+    if (reduceMotion) return { opacity: 0 };
+    const y = beamY.value;
     return {
-      opacity: interpolate(p, [0, 0.4, 1], [0, 0.8, 0.88]),
-      transform: [
-        { translateX: interpolate(p, [0, 1], [130, 30]) },
-        { translateY: interpolate(p, [0, 1], [-100, -22]) + idleY },
-        { rotate: `${interpolate(p, [0, 1], [30, 12])}deg` },
-        { scale: interpolate(p, [0, 1], [0.6, 0.94]) },
-      ],
+      opacity: interpolate(y, [0, 0.05, 0.95, 1.0], [0, 1, 1, 0]),
+      transform: [{ translateY: interpolate(y, [0, 1], [4, 134]) }],
     };
   });
 
-  const cardBottomLeftStyle = useAnimatedStyle(() => {
-    if (reduceMotion) return { opacity: entrance.value };
-    const p = entrance.value;
-    const idleY = interpolate(idle.value, [0, 1], [0, 4]);
+  // Intelligence layers revealing as scan beam passes
+  const intelligenceStyle = useAnimatedStyle(() => {
+    if (reduceMotion) return { opacity: 0 };
+    const y = beamY.value;
     return {
-      opacity: interpolate(p, [0, 0.4, 1], [0, 0.75, 0.85]),
-      transform: [
-        { translateX: interpolate(p, [0, 1], [-120, -24]) },
-        { translateY: interpolate(p, [0, 1], [110, 26]) + idleY },
-        { rotate: `${interpolate(p, [0, 1], [-26, -9])}deg` },
-        { scale: interpolate(p, [0, 1], [0.6, 0.95]) },
-      ],
+      opacity: interpolate(y, [0.15, 0.85], [0, 1]),
     };
   });
 
-  const cardBottomRightStyle = useAnimatedStyle(() => {
-    if (reduceMotion) return { opacity: entrance.value };
-    const p = entrance.value;
-    const idleY = interpolate(idle.value, [0, 1], [0, -3]);
-    return {
-      opacity: interpolate(p, [0, 0.4, 1], [0, 0.75, 0.85]),
-      transform: [
-        { translateX: interpolate(p, [0, 1], [120, 26]) },
-        { translateY: interpolate(p, [0, 1], [100, 24]) + idleY },
-        { rotate: `${interpolate(p, [0, 1], [28, 11])}deg` },
-        { scale: interpolate(p, [0, 1], [0.6, 0.93]) },
-      ],
-    };
-  });
-
-  // Animated style for central materializing logo card
-  const logoCardStyle = useAnimatedStyle(() => {
+  // Final Card Nest logo mark style
+  const logoMarkStyle = useAnimatedStyle(() => {
     if (reduceMotion) {
       return {
-        opacity: entrance.value,
-        transform: [{ scale: interpolate(entrance.value, [0, 1], [0.95, 1]) }],
+        opacity: progress.value,
+        transform: [{ scale: interpolate(progress.value, [0, 1], [0.95, 1]) }],
       };
     }
     const s = logoSpring.value;
-    const idleY = interpolate(idle.value, [0, 1], [0, -2]);
     return {
-      opacity: interpolate(s, [0, 0.2, 1], [0, 0.9, 1]),
+      opacity: interpolate(s, [0, 0.2, 1], [0, 0.8, 1]),
       transform: [
-        { translateY: idleY },
-        { scale: interpolate(s, [0, 0.7, 1], [0.4, 1.06, 1]) },
-        { rotate: `${interpolate(s, [0, 0.5, 0.8, 1], [-9, 3, -1, 0])}deg` },
+        { scale: interpolate(s, [0, 0.8, 1], [0.35, 1.05, 1]) },
       ],
     };
   });
 
-  // Cyan ambient glow style
-  const glowStyle = useAnimatedStyle(() => {
-    if (reduceMotion) return { opacity: 0.15 };
+  // Title & tagline reveal style
+  const titleStyle = useAnimatedStyle(() => {
+    if (reduceMotion) return { opacity: progress.value };
+    const s = logoSpring.value;
     return {
-      opacity: interpolate(glow.value, [0, 1], [0.12, 0.28]),
-      transform: [{ scale: interpolate(glow.value, [0, 1], [0.92, 1.1]) }],
-    };
-  });
-
-  // Wordmark & tagline fade/slide style
-  const wordmarkStyle = useAnimatedStyle(() => {
-    if (reduceMotion) return { opacity: entrance.value };
-    const p = entrance.value;
-    return {
-      opacity: interpolate(p, [0, 0.4, 1], [0, 0.2, 1]),
-      transform: [{ translateY: interpolate(p, [0, 1], [14, 0]) }],
+      opacity: interpolate(s, [0.2, 1], [0, 1]),
+      transform: [{ translateY: interpolate(s, [0, 1], [14, 0]) }],
     };
   });
 
@@ -205,69 +141,40 @@ export function LaunchScreen({ onFinish }: { onFinish: () => void }) {
       accessibilityLabel="Card Nest is opening"
       accessibilityRole="progressbar"
       style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      {/* Cyan Ambient Glow */}
-      <Animated.View
-        style={[
-          styles.glowCircle,
-          { backgroundColor: theme.colors.primary },
-          glowStyle,
-        ]}
-      />
-
-      {/* Nest Canvas / Floating Abstract Cards */}
-      <View style={styles.nestCanvas}>
+      
+      {/* Motion Stage Container */}
+      <View style={styles.stage}>
+        {/* Stage 1 & 2: Business Card Outline & Scan Beam */}
         <Animated.View
           style={[
-            styles.abstractCard,
-            {
-              backgroundColor: theme.colors.primarySoft,
-              borderColor: theme.colors.primary,
-            },
-            cardTopLeftStyle,
-          ]}
-        />
-        <Animated.View
-          style={[
-            styles.abstractCard,
-            {
-              backgroundColor: theme.colors.surfaceRaised,
-              borderColor: theme.colors.border,
-            },
-            cardTopRightStyle,
-          ]}
-        />
-        <Animated.View
-          style={[
-            styles.abstractCard,
-            {
-              backgroundColor: theme.colors.surface,
-              borderColor: theme.colors.borderStrong,
-            },
-            cardBottomLeftStyle,
-          ]}
-        />
-        <Animated.View
-          style={[
-            styles.abstractCard,
-            {
-              backgroundColor: theme.colors.primarySoft,
-              borderColor: theme.colors.primary,
-            },
-            cardBottomRightStyle,
-          ]}
-        />
-
-        {/* Central Logo Card */}
-        <Animated.View
-          style={[
-            styles.centerCard,
-            {
-              backgroundColor: theme.colors.surface,
-              borderColor: theme.colors.primary,
-              shadowColor: theme.colors.primary,
-            },
-            logoCardStyle,
+            styles.cardFrame,
+            { borderColor: theme.colors.primary, backgroundColor: theme.colors.surface },
+            cardFrameStyle,
           ]}>
+          {/* Scanning Beam */}
+          <Animated.View style={[styles.beamLine, scanBeamStyle]} />
+
+          {/* Intelligence Elements Revealed by Beam */}
+          <Animated.View style={[styles.intelligenceContent, intelligenceStyle]}>
+            {/* Avatar Ring */}
+            <View style={[styles.avatarRing, { borderColor: theme.colors.primary }]}>
+              <View style={[styles.avatarCore, { backgroundColor: theme.colors.primarySoft }]} />
+            </View>
+
+            {/* Abstract Text Lines */}
+            <View style={styles.textLines}>
+              <View style={[styles.line, { width: 110, backgroundColor: theme.colors.primary }]} />
+              <View style={[styles.line, { width: 84, backgroundColor: theme.colors.textMuted }]} />
+              <View style={[styles.line, { width: 62, backgroundColor: theme.colors.textMuted }]} />
+            </View>
+
+            {/* Connector Node */}
+            <View style={[styles.connectorDot, { backgroundColor: theme.colors.primary }]} />
+          </Animated.View>
+        </Animated.View>
+
+        {/* Stage 3: Card Nest Logo Mark */}
+        <Animated.View style={[styles.logoWrapper, logoMarkStyle]}>
           <Image
             accessibilityIgnoresInvertColors
             contentFit="contain"
@@ -277,11 +184,13 @@ export function LaunchScreen({ onFinish }: { onFinish: () => void }) {
         </Animated.View>
       </View>
 
-      {/* Wordmark & Tagline */}
-      <Animated.View style={[styles.wordmark, wordmarkStyle]}>
-        <AppText variant="title">Card Nest</AppText>
+      {/* Stage 4: Wordmark Settle */}
+      <Animated.View style={[styles.wordmark, titleStyle]}>
+        <AppText variant="display" style={{ color: theme.colors.text }}>
+          Card Nest
+        </AppText>
         <AppText muted variant="caption">
-          The contacts worth keeping
+          Business Card Intelligence
         </AppText>
       </Animated.View>
     </View>
@@ -289,51 +198,89 @@ export function LaunchScreen({ onFinish }: { onFinish: () => void }) {
 }
 
 const styles = StyleSheet.create({
-  abstractCard: {
-    borderRadius: 20,
-    borderWidth: 1.5,
-    height: 130,
-    position: 'absolute',
-    width: 210,
+  avatarCore: {
+    borderRadius: 999,
+    height: 14,
+    width: 14,
   },
-  centerCard: {
+  avatarRing: {
     alignItems: 'center',
-    borderRadius: 24,
-    borderWidth: 2,
-    elevation: 8,
-    height: 144,
+    borderRadius: 999,
+    borderWidth: 1.5,
+    height: 28,
     justifyContent: 'center',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.18,
-    shadowRadius: 16,
-    width: 224,
+    width: 28,
+  },
+  beamLine: {
+    backgroundColor: '#0CC0DF',
+    borderRadius: 999,
+    elevation: 4,
+    height: 2,
+    left: 4,
+    position: 'absolute',
+    right: 4,
+    shadowColor: '#0CC0DF',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.9,
+    shadowRadius: 6,
+    top: 0,
     zIndex: 10,
+  },
+  cardFrame: {
+    borderRadius: 14,
+    borderWidth: 1.5,
+    height: 138,
+    overflow: 'hidden',
+    position: 'absolute',
+    width: 220,
+  },
+  connectorDot: {
+    borderRadius: 999,
+    bottom: 16,
+    height: 6,
+    position: 'absolute',
+    right: 16,
+    width: 6,
   },
   container: {
     alignItems: 'center',
     flex: 1,
     justifyContent: 'center',
   },
-  glowCircle: {
-    borderRadius: 140,
-    height: 280,
-    position: 'absolute',
-    width: 280,
+  intelligenceContent: {
+    flex: 1,
+    flexDirection: 'row',
+    gap: 12,
+    padding: 16,
+  },
+  line: {
+    borderRadius: 4,
+    height: 4,
   },
   logoImage: {
-    height: 96,
-    width: 96,
+    height: 92,
+    width: 92,
   },
-  nestCanvas: {
+  logoWrapper: {
     alignItems: 'center',
-    height: 200,
+    height: 92,
     justifyContent: 'center',
-    width: 280,
+    position: 'absolute',
+    width: 92,
+  },
+  stage: {
+    alignItems: 'center',
+    height: 160,
+    justifyContent: 'center',
+    width: 240,
+  },
+  textLines: {
+    gap: 8,
+    justifyContent: 'center',
   },
   wordmark: {
     alignItems: 'center',
     gap: 4,
-    marginTop: 36,
+    marginTop: 24,
   },
 });
-

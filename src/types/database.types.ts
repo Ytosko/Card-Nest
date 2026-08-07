@@ -562,6 +562,42 @@ export type Database = {
         }
         Relationships: []
       }
+      user_ai_credentials: {
+        Row: {
+          auth_tag: string
+          created_at: string
+          encrypted_key: string
+          id: string
+          iv: string
+          key_suffix: string
+          provider: 'openai' | 'gemini'
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          auth_tag: string
+          created_at?: string
+          encrypted_key: string
+          id?: string
+          iv: string
+          key_suffix: string
+          provider: 'openai' | 'gemini'
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          auth_tag?: string
+          created_at?: string
+          encrypted_key?: string
+          id?: string
+          iv?: string
+          key_suffix?: string
+          provider?: 'openai' | 'gemini'
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

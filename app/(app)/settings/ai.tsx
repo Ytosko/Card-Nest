@@ -10,9 +10,9 @@ import { AppTextField } from '@/src/components/ui/app-text-field';
 import { AuthNotice } from '@/src/features/auth/components/auth-notice';
 import {
   fetchProviderModels,
-  getProviderKey,
-  removeProviderKey,
-  setProviderKey,
+  getServerCredentialStatus,
+  removeServerCredential,
+  saveServerCredential,
   type AiProvider,
 } from '@/src/features/ai/ai-provider';
 import { useAuth } from '@/src/features/auth/auth-provider';
@@ -25,7 +25,8 @@ export default function AiSettingsScreen() {
 
   const [provider, setProvider] = useState<AiProvider>('openai');
   const [apiKeyInput, setApiKeyInput] = useState('');
-  const [storedKey, setStoredKey] = useState<string | null>(null);
+  const [keySuffix, setKeySuffix] = useState<string | null>(null);
+  const [hasServerKey, setHasServerKey] = useState(false);
   const [models, setModels] = useState<string[]>([]);
   const [selectedModel, setSelectedModel] = useState('');
   const [modelFilter, setModelFilter] = useState('');
@@ -34,17 +35,14 @@ export default function AiSettingsScreen() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const hasKey = Boolean(storedKey);
-
-  // Masked key for display e.g. ••••••••3f9a
+  // Masked key display e.g. ••••••••3f9a
   const maskedKeyDisplay = useMemo(() => {
-    if (!storedKey) return null;
-    const len = storedKey.length;
-    const suffix = len > 4 ? storedKey.slice(-4) : '••••';
+    if (!hasServerKey && !keySuffix) return null;
+    const suffix = keySuffix || '••••';
     return `••••••••${suffix}`;
-  }, [storedKey]);
+  }, [hasServerKey, keySuffix]);
 
-  // Load preferences from database
+  // Load user preferences and server credential status from database
   useEffect(() => {
     if (!user) return;
     void supabase
@@ -63,20 +61,18 @@ export default function AiSettingsScreen() {
   }, [user]);
 
   const testAndFetchModels = useCallback(
-    async (prov: AiProvider, keyToUse: string, verbose = true) => {
+    async (prov: AiProvider, apiKeyToTest?: string, verbose = true) => {
       try {
-        const available = await fetchProviderModels(prov, keyToUse);
+        const available = await fetchProviderModels(prov, apiKeyToTest);
         if (!available.length) throw new Error('No compatible vision models were returned by the provider.');
         setModels(available);
 
-        // Determine model to select
         let modelToSave = selectedModel;
         if (!modelToSave || !available.includes(modelToSave)) {
           modelToSave = available[0];
           setSelectedModel(modelToSave);
         }
 
-        // Persist preferences to database
         if (user) {
           await supabase.from('user_preferences').upsert({
             user_id: user.id,
@@ -86,7 +82,7 @@ export default function AiSettingsScreen() {
         }
 
         if (verbose) {
-          setNotice(`Connected to ${prov === 'openai' ? 'OpenAI' : 'Gemini'}. ${available.length} models ready.`);
+          setNotice(`Connected to ${prov === 'openai' ? 'OpenAI' : 'Gemini'}. ${available.length} vision models ready.`);
         }
         return available;
       } catch (reason) {
@@ -99,17 +95,22 @@ export default function AiSettingsScreen() {
     [selectedModel, user]
   );
 
-  // Refresh stored key state when provider changes
+  // Refresh credential status whenever provider or user changes
   useEffect(() => {
     setApiKeyInput('');
     setModels([]);
     setError(null);
     setNotice(null);
-    void getProviderKey(provider).then((key) => {
-      setStoredKey(key);
-      if (key) {
-        // Auto-fetch available models if key is present
-        void testAndFetchModels(provider, key, false);
+
+    void getServerCredentialStatus().then((status) => {
+      const provStatus = status[provider];
+      if (provStatus?.hasKey) {
+        setHasServerKey(true);
+        setKeySuffix(provStatus.keySuffix);
+        void testAndFetchModels(provider, undefined, false);
+      } else {
+        setHasServerKey(false);
+        setKeySuffix(null);
       }
     });
   }, [provider, testAndFetchModels]);
@@ -120,21 +121,21 @@ export default function AiSettingsScreen() {
     setNotice(null);
     try {
       const newKey = apiKeyInput.trim();
-      const activeKey = newKey || storedKey;
 
-      if (!activeKey) {
+      if (!newKey && !hasServerKey) {
         throw new Error('Please enter an API key for ' + (provider === 'openai' ? 'OpenAI' : 'Gemini') + '.');
       }
 
-      // Save new key to SecureStore if entered
+      // Save encrypted key to server database via Edge Function
       if (newKey) {
-        await setProviderKey(provider, newKey);
-        setStoredKey(newKey);
+        const { keySuffix: savedSuffix } = await saveServerCredential(provider, newKey);
+        setHasServerKey(true);
+        setKeySuffix(savedSuffix);
         setApiKeyInput('');
+        await testAndFetchModels(provider, newKey, true);
+      } else {
+        await testAndFetchModels(provider, undefined, true);
       }
-
-      // Fetch models and save preference
-      await testAndFetchModels(provider, activeKey, true);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not save or test key.');
     } finally {
@@ -165,11 +166,12 @@ export default function AiSettingsScreen() {
     setError(null);
     setNotice(null);
     try {
-      await removeProviderKey(provider);
-      setStoredKey(null);
+      await removeServerCredential(provider);
+      setHasServerKey(false);
+      setKeySuffix(null);
       setApiKeyInput('');
       setModels([]);
-      setNotice(`API key removed from device.`);
+      setNotice(`API key removed from account and device.`);
     } catch {
       setError('Could not remove API key.');
     } finally {
@@ -196,22 +198,22 @@ export default function AiSettingsScreen() {
           style={[
             styles.statusBanner,
             {
-              backgroundColor: hasKey ? theme.colors.primarySoft : theme.colors.surface,
-              borderColor: hasKey ? theme.colors.primary : theme.colors.border,
+              backgroundColor: hasServerKey ? theme.colors.primarySoft : theme.colors.surface,
+              borderColor: hasServerKey ? theme.colors.primary : theme.colors.border,
             },
           ]}>
           <MaterialCommunityIcons
-            color={hasKey ? theme.colors.primary : theme.colors.textMuted}
-            name={hasKey ? 'check-circle' : 'alert-circle-outline'}
+            color={hasServerKey ? theme.colors.primary : theme.colors.textMuted}
+            name={hasServerKey ? 'check-circle' : 'alert-circle-outline'}
             size={24}
           />
           <View style={{ flex: 1, gap: 2 }}>
             <AppText variant="bodyStrong">
-              {provider === 'openai' ? 'OpenAI' : 'Google Gemini'} — {hasKey ? 'Connected' : 'Key Required'}
+              {provider === 'openai' ? 'OpenAI' : 'Google Gemini'} — {hasServerKey ? 'Connected' : 'Key Required'}
             </AppText>
-            {hasKey && maskedKeyDisplay ? (
+            {hasServerKey && maskedKeyDisplay ? (
               <AppText muted variant="caption">
-                Key: {maskedKeyDisplay} · Model: {selectedModel || 'None selected'}
+                API Key: {maskedKeyDisplay} · Model: {selectedModel || 'None selected'}
               </AppText>
             ) : (
               <AppText muted variant="caption">
@@ -246,12 +248,12 @@ export default function AiSettingsScreen() {
             },
           ]}>
           <View style={styles.secureHeader}>
-            <MaterialCommunityIcons color={theme.colors.primary} name="shield-key-outline" size={22} />
+            <MaterialCommunityIcons color={theme.colors.primary} name="shield-lock-outline" size={22} />
             <View style={{ flex: 1 }}>
               <AppText variant="title">
-                {hasKey ? 'Manage API Key' : 'Connect ' + (provider === 'openai' ? 'OpenAI' : 'Gemini')}
+                {hasServerKey ? 'Manage API Key' : 'Connect ' + (provider === 'openai' ? 'OpenAI' : 'Gemini')}
               </AppText>
-              <AppText muted variant="caption">Stored in device SecureStore only</AppText>
+              <AppText muted variant="caption">Encrypted at rest (AES-256-GCM) · Synced to your account</AppText>
             </View>
           </View>
 
@@ -259,21 +261,21 @@ export default function AiSettingsScreen() {
             autoCapitalize="none"
             autoCorrect={false}
             icon="key-outline"
-            label={hasKey ? 'Replace API Key' : 'API Key'}
+            label={hasServerKey ? 'Replace API Key' : 'API Key'}
             onChangeText={setApiKeyInput}
-            placeholder={hasKey ? 'Paste new key to replace' : 'Paste your API key'}
+            placeholder={hasServerKey ? 'Paste new key to replace' : 'Paste your API key'}
             secureTextEntry
             value={apiKeyInput}
           />
 
           <View style={{ gap: 10 }}>
             <AppButton loading={busy} onPress={() => void handleSaveOrTestKey()}>
-              {apiKeyInput.trim() ? 'Save and Test Key' : hasKey ? 'Test Connection & Refresh Models' : 'Connect Provider'}
+              {apiKeyInput.trim() ? 'Save Encrypted Key & Connect' : hasServerKey ? 'Test Connection & Refresh Models' : 'Connect Provider'}
             </AppButton>
 
-            {hasKey ? (
+            {hasServerKey ? (
               <AppButton disabled={busy} onPress={() => void handleRemoveKey()} variant="secondary">
-                Remove Key from Device
+                Remove Key from Account
               </AppButton>
             ) : null}
           </View>
