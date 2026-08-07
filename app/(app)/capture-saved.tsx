@@ -107,9 +107,9 @@ export default function CaptureSavedScreen() {
         ) : null}
 
         <AppButton
-          onPress={() => router.replace('/(app)/(tabs)/cards')}
+          onPress={() => router.replace('/(app)/(tabs)')}
           variant={isSynced || isFailed ? 'secondary' : 'primary'}>
-          Go to cards
+          Go to contacts
         </AppButton>
         
         <AppButton onPress={() => router.replace('/(app)/(tabs)/scan')} variant="secondary">

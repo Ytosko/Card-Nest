@@ -82,7 +82,7 @@ export default function CardDetailScreen() {
       <View style={[styles.center, { backgroundColor: theme.colors.background, padding: 24 }]}>
         <AppText variant="title">Contact not found</AppText>
         <AppText muted>This contact may have been deleted or moved.</AppText>
-        <AppButton onPress={() => router.replace('/(app)/(tabs)/cards')}>Back to contacts</AppButton>
+        <AppButton onPress={() => router.replace('/(app)/(tabs)')}>Back to contacts</AppButton>
       </View>
     );
   }
@@ -156,7 +156,7 @@ export default function CardDetailScreen() {
       await deleteCard(person);
       await client.invalidateQueries({ queryKey: cardKeys.all });
       setIsDeleting(false);
-      router.replace('/(app)/(tabs)/cards');
+      router.replace('/(app)/(tabs)');
     } catch {
       setIsDeleting(false);
       setError('We could not delete this contact. Please try again.');
@@ -189,6 +189,20 @@ export default function CardDetailScreen() {
     setToastMessage(`${label} copied to clipboard`);
     setTimeout(() => setToastMessage(null), 2500);
   }
+
+  const phoneNumbers =
+    person.card_phone_numbers?.length > 0
+      ? person.card_phone_numbers
+      : person.primary_phone
+      ? [{ id: 'primary', phone_number: person.primary_phone, label: 'Mobile', is_primary: true }]
+      : [];
+
+  const emails =
+    person.card_emails?.length > 0
+      ? person.card_emails
+      : person.primary_email
+      ? [{ id: 'primary', email: person.primary_email, label: 'Work', is_primary: true }]
+      : [];
 
   return (
     <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: theme.colors.background }]}>
@@ -316,22 +330,79 @@ export default function CardDetailScreen() {
           />
         </View>
 
-        {/* Structured Contact Details */}
-        <Section title="Contact Information">
-          <DetailRow
-            icon="phone-outline"
-            label="Phone"
-            onCopy={() => copyValue('Phone', person.primary_phone!)}
-            onPress={() => void Linking.openURL(`tel:${person.primary_phone}`)}
-            value={person.primary_phone}
-          />
-          <DetailRow
-            icon="email-outline"
-            label="Email"
-            onCopy={() => copyValue('Email', person.primary_email!)}
-            onPress={() => void Linking.openURL(`mailto:${person.primary_email}`)}
-            value={person.primary_email}
-          />
+        {/* Structured Contact Details — Support ALL Phone Numbers */}
+        <Section title="Phone Numbers">
+          {phoneNumbers.length > 0 ? (
+            phoneNumbers.map((p, idx) => (
+              <View key={p.id || idx} style={styles.multiRow}>
+                <MaterialCommunityIcons color={theme.colors.primary} name="phone-outline" size={21} />
+                <View style={styles.detailCopy}>
+                  <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+                    <AppText muted variant="caption">
+                      {p.label || 'Phone'}
+                    </AppText>
+                    {p.is_primary ? (
+                      <AppText variant="caption" style={{ color: theme.colors.primary, fontWeight: '700' }}>
+                        (Primary)
+                      </AppText>
+                    ) : null}
+                  </View>
+                  <AppText style={{ color: theme.colors.primary, fontSize: 16 }}>{p.phone_number}</AppText>
+                </View>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <Pressable accessibilityLabel="Call" hitSlop={6} onPress={() => void Linking.openURL(`tel:${p.phone_number}`)}>
+                    <MaterialCommunityIcons color={theme.colors.primary} name="phone" size={20} />
+                  </Pressable>
+                  <Pressable accessibilityLabel="SMS" hitSlop={6} onPress={() => void Linking.openURL(`sms:${p.phone_number}`)}>
+                    <MaterialCommunityIcons color={theme.colors.primary} name="message-text-outline" size={20} />
+                  </Pressable>
+                  <Pressable accessibilityLabel="Copy phone" hitSlop={6} onPress={() => copyValue(p.label || 'Phone', p.phone_number)}>
+                    <MaterialCommunityIcons color={theme.colors.textMuted} name="content-copy" size={18} />
+                  </Pressable>
+                </View>
+              </View>
+            ))
+          ) : (
+            <AppText muted variant="caption">No phone number recorded</AppText>
+          )}
+        </Section>
+
+        {/* Structured Contact Details — Support ALL Email Addresses */}
+        <Section title="Email Addresses">
+          {emails.length > 0 ? (
+            emails.map((e, idx) => (
+              <View key={e.id || idx} style={styles.multiRow}>
+                <MaterialCommunityIcons color={theme.colors.primary} name="email-outline" size={21} />
+                <View style={styles.detailCopy}>
+                  <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+                    <AppText muted variant="caption">
+                      {e.label || 'Email'}
+                    </AppText>
+                    {e.is_primary ? (
+                      <AppText variant="caption" style={{ color: theme.colors.primary, fontWeight: '700' }}>
+                        (Primary)
+                      </AppText>
+                    ) : null}
+                  </View>
+                  <AppText style={{ color: theme.colors.primary, fontSize: 16 }}>{e.email}</AppText>
+                </View>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <Pressable accessibilityLabel="Email" hitSlop={6} onPress={() => void Linking.openURL(`mailto:${e.email}`)}>
+                    <MaterialCommunityIcons color={theme.colors.primary} name="email" size={20} />
+                  </Pressable>
+                  <Pressable accessibilityLabel="Copy email" hitSlop={6} onPress={() => copyValue(e.label || 'Email', e.email)}>
+                    <MaterialCommunityIcons color={theme.colors.textMuted} name="content-copy" size={18} />
+                  </Pressable>
+                </View>
+              </View>
+            ))
+          ) : (
+            <AppText muted variant="caption">No email address recorded</AppText>
+          )}
+        </Section>
+
+        {/* Company & Job Information */}
+        <Section title="Organization & Details">
           <DetailRow
             icon="domain"
             label="Company"
@@ -555,6 +626,12 @@ const styles = StyleSheet.create({
     maxWidth: 340,
     padding: 28,
     width: '100%',
+  },
+  multiRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12,
+    minHeight: 52,
   },
   quick: {
     alignItems: 'center',

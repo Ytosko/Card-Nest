@@ -10,7 +10,10 @@ import { AuthNotice } from '@/src/features/auth/components/auth-notice';
 import { uploadContactPhoto, removeContactPhoto } from '@/src/features/cards/card-service';
 import { useAppTheme } from '@/src/theme/theme-provider';
 
-import { cardDraftSchema, type CardDraft } from '../card-schema';
+import { cardDraftSchema, type CardDraft, type EmailItem, type PhoneItem } from '../card-schema';
+
+const PHONE_LABELS = ['Mobile', 'Work', 'Office', 'Direct', 'Landline', 'Fax', 'Other'];
+const EMAIL_LABELS = ['Work', 'Personal', 'Other'];
 
 export function CardForm({
   initial,
@@ -39,6 +42,70 @@ export function CardForm({
 
   const set = (field: keyof CardDraft) => (value: string) =>
     setDraft((current) => ({ ...current, [field]: value }));
+
+  // Multi-phone helpers
+  const phones: PhoneItem[] = draft.phones?.length
+    ? draft.phones
+    : [{ phone: draft.phone || '', label: 'Mobile', isPrimary: true }];
+
+  function updatePhone(index: number, key: keyof PhoneItem, val: any) {
+    const next = [...phones];
+    if (key === 'isPrimary' && val === true) {
+      next.forEach((p, i) => {
+        p.isPrimary = i === index;
+      });
+    } else {
+      (next[index] as any)[key] = val;
+    }
+    setDraft((cur) => ({ ...cur, phones: next, phone: next.find((p) => p.isPrimary)?.phone || next[0]?.phone || '' }));
+  }
+
+  function addPhone() {
+    setDraft((cur) => ({
+      ...cur,
+      phones: [...phones, { phone: '', label: 'Work', isPrimary: phones.length === 0 }],
+    }));
+  }
+
+  function removePhone(index: number) {
+    const next = phones.filter((_, i) => i !== index);
+    if (next.length > 0 && !next.some((p) => p.isPrimary)) {
+      next[0].isPrimary = true;
+    }
+    setDraft((cur) => ({ ...cur, phones: next, phone: next[0]?.phone || '' }));
+  }
+
+  // Multi-email helpers
+  const emails: EmailItem[] = draft.emails?.length
+    ? draft.emails
+    : [{ email: draft.email || '', label: 'Work', isPrimary: true }];
+
+  function updateEmail(index: number, key: keyof EmailItem, val: any) {
+    const next = [...emails];
+    if (key === 'isPrimary' && val === true) {
+      next.forEach((e, i) => {
+        e.isPrimary = i === index;
+      });
+    } else {
+      (next[index] as any)[key] = val;
+    }
+    setDraft((cur) => ({ ...cur, emails: next, email: next.find((e) => e.isPrimary)?.email || next[0]?.email || '' }));
+  }
+
+  function addEmail() {
+    setDraft((cur) => ({
+      ...cur,
+      emails: [...emails, { email: '', label: 'Personal', isPrimary: emails.length === 0 }],
+    }));
+  }
+
+  function removeEmail(index: number) {
+    const next = emails.filter((_, i) => i !== index);
+    if (next.length > 0 && !next.some((e) => e.isPrimary)) {
+      next[0].isPrimary = true;
+    }
+    setDraft((cur) => ({ ...cur, emails: next, email: next[0]?.email || '' }));
+  }
 
   async function pickPhoto() {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -75,7 +142,6 @@ export function CardForm({
     }
     setFieldError(null);
 
-    // If user uploaded or removed a contact photo
     if (cardId && userId) {
       if (photoUri) {
         await uploadContactPhoto(cardId, userId, photoUri).catch(() => undefined);
@@ -136,7 +202,7 @@ export function CardForm({
           </View>
         </FormSection>
 
-        {/* 1. Full Name (Core Field 1) */}
+        {/* 1. Full Name */}
         <FormSection badge="1" icon="account-outline" title="Full Name">
           <AppTextField
             autoCapitalize="words"
@@ -153,26 +219,137 @@ export function CardForm({
           <AppTextField autoCapitalize="words" label="Middle Name" onChangeText={set('middleName')} value={draft.middleName} />
         </FormSection>
 
-        {/* 2. Business & Company (Core Field 2) */}
+        {/* 2. Business & Company */}
         <FormSection badge="2" icon="domain" title="Business & Company">
           <AppTextField autoCapitalize="words" icon="domain" label="Company / Business Name" onChangeText={set('company')} value={draft.company} />
           <AppTextField autoCapitalize="words" icon="briefcase-outline" label="Job Title" onChangeText={set('jobTitle')} value={draft.jobTitle} />
           <AppTextField autoCapitalize="words" label="Department" onChangeText={set('department')} value={draft.department} />
         </FormSection>
 
-        {/* 3. Phone Numbers (Core Field 3) */}
-        <FormSection badge="3" icon="phone-outline" title="Phone Numbers">
-          <AppTextField autoComplete="tel" icon="phone-outline" keyboardType="phone-pad" label="Primary Phone" onChangeText={set('phone')} value={draft.phone} />
-          <AppTextField icon="fax" keyboardType="phone-pad" label="Fax Number" onChangeText={set('fax')} value={draft.fax} />
+        {/* 3. MULTIPLE Phone Numbers */}
+        <FormSection badge="3" icon="phone-outline" title="Phone Numbers (Multiple Supported)">
+          {phones.map((p, idx) => (
+            <View key={idx} style={[styles.itemCard, { backgroundColor: theme.colors.background, borderColor: theme.colors.border }]}>
+              <View style={styles.itemHeader}>
+                <Pressable
+                  onPress={() => updatePhone(idx, 'isPrimary', true)}
+                  style={[styles.primaryBadge, { backgroundColor: p.isPrimary ? theme.colors.primarySoft : theme.colors.surface }]}>
+                  <MaterialCommunityIcons color={p.isPrimary ? theme.colors.primary : theme.colors.textMuted} name={p.isPrimary ? 'star' : 'star-outline'} size={16} />
+                  <AppText variant="caption" style={{ color: p.isPrimary ? theme.colors.primary : theme.colors.textMuted, fontWeight: p.isPrimary ? '700' : '400' }}>
+                    {p.isPrimary ? 'Primary Phone' : 'Set Primary'}
+                  </AppText>
+                </Pressable>
+
+                {phones.length > 1 ? (
+                  <Pressable hitSlop={8} onPress={() => removePhone(idx)}>
+                    <MaterialCommunityIcons color={theme.colors.danger} name="trash-can-outline" size={18} />
+                  </Pressable>
+                ) : null}
+              </View>
+
+              <AppTextField
+                autoComplete="tel"
+                icon="phone-outline"
+                keyboardType="phone-pad"
+                label={`Phone Number ${idx + 1}`}
+                onChangeText={(text) => updatePhone(idx, 'phone', text)}
+                placeholder="+1 555-0199"
+                value={p.phone}
+              />
+
+              <View style={styles.labelsRow}>
+                <AppText muted variant="caption">Label:</AppText>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                  {PHONE_LABELS.map((lbl) => (
+                    <Pressable
+                      key={lbl}
+                      onPress={() => updatePhone(idx, 'label', lbl)}
+                      style={[
+                        styles.chipOption,
+                        {
+                          backgroundColor: p.label === lbl ? theme.colors.primarySoft : theme.colors.surface,
+                          borderColor: p.label === lbl ? theme.colors.primary : theme.colors.border,
+                        },
+                      ]}>
+                      <AppText variant="caption" style={{ color: p.label === lbl ? theme.colors.primary : theme.colors.text }}>
+                        {lbl}
+                      </AppText>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              </View>
+            </View>
+          ))}
+
+          <AppButton onPress={addPhone} variant="secondary">
+            + Add another phone number
+          </AppButton>
         </FormSection>
 
-        {/* 4. Email & Web (Core Field 4) */}
-        <FormSection badge="4" icon="email-outline" title="Email & Web">
-          <AppTextField autoCapitalize="none" autoComplete="email" icon="email-outline" keyboardType="email-address" label="Email Address" onChangeText={set('email')} value={draft.email} />
+        {/* 4. MULTIPLE Email Addresses */}
+        <FormSection badge="4" icon="email-outline" title="Email Addresses (Multiple Supported)">
+          {emails.map((e, idx) => (
+            <View key={idx} style={[styles.itemCard, { backgroundColor: theme.colors.background, borderColor: theme.colors.border }]}>
+              <View style={styles.itemHeader}>
+                <Pressable
+                  onPress={() => updateEmail(idx, 'isPrimary', true)}
+                  style={[styles.primaryBadge, { backgroundColor: e.isPrimary ? theme.colors.primarySoft : theme.colors.surface }]}>
+                  <MaterialCommunityIcons color={e.isPrimary ? theme.colors.primary : theme.colors.textMuted} name={e.isPrimary ? 'star' : 'star-outline'} size={16} />
+                  <AppText variant="caption" style={{ color: e.isPrimary ? theme.colors.primary : theme.colors.textMuted, fontWeight: e.isPrimary ? '700' : '400' }}>
+                    {e.isPrimary ? 'Primary Email' : 'Set Primary'}
+                  </AppText>
+                </Pressable>
+
+                {emails.length > 1 ? (
+                  <Pressable hitSlop={8} onPress={() => removeEmail(idx)}>
+                    <MaterialCommunityIcons color={theme.colors.danger} name="trash-can-outline" size={18} />
+                  </Pressable>
+                ) : null}
+              </View>
+
+              <AppTextField
+                autoCapitalize="none"
+                autoComplete="email"
+                icon="email-outline"
+                keyboardType="email-address"
+                label={`Email Address ${idx + 1}`}
+                onChangeText={(text) => updateEmail(idx, 'email', text)}
+                placeholder="person@company.com"
+                value={e.email}
+              />
+
+              <View style={styles.labelsRow}>
+                <AppText muted variant="caption">Label:</AppText>
+                <View style={{ flexDirection: 'row', gap: 6 }}>
+                  {EMAIL_LABELS.map((lbl) => (
+                    <Pressable
+                      key={lbl}
+                      onPress={() => updateEmail(idx, 'label', lbl)}
+                      style={[
+                        styles.chipOption,
+                        {
+                          backgroundColor: e.label === lbl ? theme.colors.primarySoft : theme.colors.surface,
+                          borderColor: e.label === lbl ? theme.colors.primary : theme.colors.border,
+                        },
+                      ]}>
+                      <AppText variant="caption" style={{ color: e.label === lbl ? theme.colors.primary : theme.colors.text }}>
+                        {lbl}
+                      </AppText>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+            </View>
+          ))}
+
+          <AppButton onPress={addEmail} variant="secondary">
+            + Add another email address
+          </AppButton>
+
           <AppTextField autoCapitalize="none" icon="web" keyboardType="url" label="Website / Social Profile" onChangeText={set('website')} placeholder="https://" value={draft.website} />
         </FormSection>
 
-        {/* 5. Address (Core Field 5) */}
+        {/* 5. Address */}
         <FormSection badge="5" icon="map-marker-outline" title="Physical Address">
           <AppTextField label="Street Address Line 1" onChangeText={set('addressLine1')} value={draft.addressLine1} />
           <AppTextField label="Suite / Unit / Line 2" onChangeText={set('addressLine2')} value={draft.addressLine2} />
@@ -186,7 +363,7 @@ export function CardForm({
           </View>
         </FormSection>
 
-        {/* 6. Additional Notes & Raw Transcription */}
+        {/* 6. Notes */}
         <FormSection icon="text-box-outline" title="Notes & Raw Transcription">
           <AppTextField
             label="Notes"
@@ -280,8 +457,30 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 22,
   },
+  chipOption: {
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
   content: { alignSelf: 'center', maxWidth: 760, paddingBottom: 48, width: '100%' },
   flex: { flex: 1 },
+  itemCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 10,
+    padding: 12,
+  },
+  itemHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  labelsRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
   notes: { minHeight: 100, paddingTop: 12 },
   photoActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   photoBtn: {
@@ -294,6 +493,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   photoWrap: { alignItems: 'center', flexDirection: 'row', gap: 16 },
+  primaryBadge: {
+    alignItems: 'center',
+    borderRadius: 999,
+    flexDirection: 'row',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
   section: { borderWidth: 1 },
   sectionHeader: { alignItems: 'center', flexDirection: 'row', gap: 10 },
   split: { flexDirection: 'row', gap: 12 },

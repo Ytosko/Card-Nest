@@ -15,11 +15,17 @@ export type CardWithRelations = Card & {
   card_tags: { tags: Tables<'tags'> | null }[];
 };
 
-function clean(value: string) {
+function clean(value?: string | null) {
+  if (!value) return null;
   return value.trim() || null;
 }
 
 function cardValues(draft: CardDraft) {
+  const primaryEmail =
+    draft.emails?.find((e) => e.isPrimary)?.email || draft.emails?.[0]?.email || draft.email;
+  const primaryPhone =
+    draft.phones?.find((p) => p.isPrimary)?.phone || draft.phones?.[0]?.phone || draft.phone;
+
   return {
     display_name: displayNameForDraft(draft),
     first_name: clean(draft.firstName),
@@ -28,8 +34,8 @@ function cardValues(draft: CardDraft) {
     company: clean(draft.company),
     job_title: clean(draft.jobTitle),
     department: clean(draft.department),
-    primary_email: clean(draft.email),
-    primary_phone: clean(draft.phone),
+    primary_email: clean(primaryEmail),
+    primary_phone: clean(primaryPhone),
     website: clean(draft.website),
     address_line_1: clean(draft.addressLine1),
     address_line_2: clean(draft.addressLine2),
@@ -46,12 +52,12 @@ function cardValues(draft: CardDraft) {
 export async function listCards(limit = 100) {
   const { data, error } = await supabase
     .from('cards')
-    .select('*')
+    .select('*, card_emails(*), card_phone_numbers(*), card_websites(*), card_addresses(*), card_images(*), card_tags(tags(*))')
     .neq('status', 'archived')
     .order('updated_at', { ascending: false })
     .limit(limit);
   if (error) throw error;
-  return data;
+  return data as CardWithRelations[];
 }
 
 export async function searchCards(query: string) {
@@ -109,9 +115,70 @@ async function syncPrimaryRelations(cardId: string, userId: string, draft: CardD
   if (deletionError) throw deletionError;
 
   const inserts = [];
-  if (draft.email) inserts.push(supabase.from('card_emails').insert({ user_id: userId, card_id: cardId, email: draft.email, is_primary: true }));
-  if (draft.phone) inserts.push(supabase.from('card_phone_numbers').insert({ user_id: userId, card_id: cardId, phone_number: draft.phone, is_primary: true }));
-  if (draft.website) inserts.push(supabase.from('card_websites').insert({ user_id: userId, card_id: cardId, url: draft.website, is_primary: true }));
+
+  // Insert all emails
+  const validEmails = draft.emails?.filter((e) => Boolean(e.email?.trim())) ?? [];
+  if (validEmails.length > 0) {
+    for (const e of validEmails) {
+      inserts.push(
+        supabase.from('card_emails').insert({
+          user_id: userId,
+          card_id: cardId,
+          email: e.email.trim(),
+          label: e.label?.trim() || 'Work',
+          is_primary: Boolean(e.isPrimary),
+        })
+      );
+    }
+  } else if (draft.email) {
+    inserts.push(
+      supabase.from('card_emails').insert({
+        user_id: userId,
+        card_id: cardId,
+        email: draft.email.trim(),
+        label: 'Work',
+        is_primary: true,
+      })
+    );
+  }
+
+  // Insert all phones
+  const validPhones = draft.phones?.filter((p) => Boolean(p.phone?.trim())) ?? [];
+  if (validPhones.length > 0) {
+    for (const p of validPhones) {
+      inserts.push(
+        supabase.from('card_phone_numbers').insert({
+          user_id: userId,
+          card_id: cardId,
+          phone_number: p.phone.trim(),
+          label: p.label?.trim() || 'Mobile',
+          is_primary: Boolean(p.isPrimary),
+        })
+      );
+    }
+  } else if (draft.phone) {
+    inserts.push(
+      supabase.from('card_phone_numbers').insert({
+        user_id: userId,
+        card_id: cardId,
+        phone_number: draft.phone.trim(),
+        label: 'Mobile',
+        is_primary: true,
+      })
+    );
+  }
+
+  if (draft.website) {
+    inserts.push(
+      supabase.from('card_websites').insert({
+        user_id: userId,
+        card_id: cardId,
+        url: draft.website.trim(),
+        is_primary: true,
+      })
+    );
+  }
+
   if (draft.addressLine1 || draft.addressLine2 || draft.city || draft.stateRegion || draft.postalCode || draft.country) {
     inserts.push(
       supabase.from('card_addresses').insert({
@@ -127,6 +194,7 @@ async function syncPrimaryRelations(cardId: string, userId: string, draft: CardD
       })
     );
   }
+
   const results = await Promise.all(inserts);
   const insertionError = results.find((result) => result.error)?.error;
   if (insertionError) throw insertionError;
@@ -281,7 +349,31 @@ export async function setCardTag(cardId: string, userId: string, tagId: string, 
   if (error) throw error;
 }
 
-export function draftFromCard(card: Card): CardDraft {
+export function draftFromCard(card: CardWithRelations | Card): CardDraft {
+  const emails =
+    'card_emails' in card && Array.isArray(card.card_emails) && card.card_emails.length > 0
+      ? card.card_emails.map((e) => ({
+          id: e.id,
+          email: e.email,
+          label: e.label ?? 'Work',
+          isPrimary: e.is_primary ?? false,
+        }))
+      : card.primary_email
+      ? [{ email: card.primary_email, label: 'Work', isPrimary: true }]
+      : [{ email: '', label: 'Work', isPrimary: true }];
+
+  const phones =
+    'card_phone_numbers' in card && Array.isArray(card.card_phone_numbers) && card.card_phone_numbers.length > 0
+      ? card.card_phone_numbers.map((p) => ({
+          id: p.id,
+          phone: p.phone_number,
+          label: p.label ?? 'Mobile',
+          isPrimary: p.is_primary ?? false,
+        }))
+      : card.primary_phone
+      ? [{ phone: card.primary_phone, label: 'Mobile', isPrimary: true }]
+      : [{ phone: '', label: 'Mobile', isPrimary: true }];
+
   return {
     firstName: card.first_name ?? '',
     middleName: card.middle_name ?? '',
@@ -290,9 +382,11 @@ export function draftFromCard(card: Card): CardDraft {
     company: card.company ?? '',
     jobTitle: card.job_title ?? '',
     department: card.department ?? '',
-    email: card.primary_email ?? '',
-    phone: card.primary_phone ?? '',
+    email: card.primary_email ?? emails[0]?.email ?? '',
+    phone: card.primary_phone ?? phones[0]?.phone ?? '',
     fax: '',
+    emails,
+    phones,
     website: card.website ?? '',
     addressLine1: card.address_line_1 ?? '',
     addressLine2: card.address_line_2 ?? '',
