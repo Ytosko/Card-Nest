@@ -12,6 +12,7 @@ import { getFieldErrors, normalizeEmail, signUpSchema, type FieldErrors, validat
 import { AuthLink } from '@/src/features/auth/components/auth-link';
 import { AuthNotice } from '@/src/features/auth/components/auth-notice';
 import { AuthShell } from '@/src/features/auth/components/auth-shell';
+import { GOOGLE_SIGN_IN_ENABLED } from '@/src/features/auth/auth-flags';
 import { AuthMethodDivider, GoogleAuthButton } from '@/src/features/auth/components/google-auth-button';
 import { supabase } from '@/src/lib/supabase/client';
 import { useAppTheme } from '@/src/theme/theme-provider';
@@ -166,8 +167,12 @@ export default function SignUpScreen() {
           <AppButton disabled={googleLoading} loading={loading} onPress={() => void submit()}>
             Create account
           </AppButton>
-          <AuthMethodDivider />
-          <GoogleAuthButton disabled={loading} loading={googleLoading} onPress={() => void submitGoogle()} />
+          {GOOGLE_SIGN_IN_ENABLED ? (
+            <>
+              <AuthMethodDivider />
+              <GoogleAuthButton disabled={loading} loading={googleLoading} onPress={() => void submitGoogle()} />
+            </>
+          ) : null}
         </View>
       </AuthShell>
     </>

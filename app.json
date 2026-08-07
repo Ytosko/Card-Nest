@@ -12,9 +12,13 @@
     "primaryColor": "#0CC0DF",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "dev.ytosko.cardnest",
+      "buildNumber": "1"
     },
     "android": {
+      "package": "dev.ytosko.cardnest",
+      "versionCode": 1,
       "adaptiveIcon": {
         "backgroundColor": "#0CC0DF",
         "foregroundImage": "./assets/images/cardnest-adaptive-foreground.png"
