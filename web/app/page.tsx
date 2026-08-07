@@ -36,7 +36,7 @@ export default function HomePage() {
           <div className="mt-9 flex flex-wrap gap-4">
             <a
               className="focus-ring inline-flex min-h-12 items-center rounded-xl bg-[#079cb8] px-6 font-bold text-white transition hover:bg-[#067a90]"
-              href="https://github.com/Ytosko/card-nest"
+              href="https://github.com/Ytosko/Card-Nest"
               rel="noreferrer"
               target="_blank">
               View on GitHub

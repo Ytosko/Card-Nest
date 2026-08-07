@@ -19,7 +19,7 @@ Supabase Auth callback: `https://cardnest.ytosko.dev/auth/callback`
 1. In Coolify, open the destination project and environment.
 2. Select **New Resource**.
 3. Choose **Public Repository** for a public repository. For a private repository, choose the configured **GitHub App** or **Deploy Key** connection.
-4. Select or paste `https://github.com/Ytosko/card-nest`.
+4. Select or paste `https://github.com/Ytosko/Card-Nest`.
 5. Choose the `main` branch.
 6. Select **Docker Compose** as the build pack.
 7. Set **Base Directory** to `/`.
