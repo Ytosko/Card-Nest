@@ -57,12 +57,12 @@ export default function HomePage() {
             <span className="h-2 w-2 rounded-full bg-[#0CC0DF]" aria-hidden />
             For Android and iOS
           </div>
-          <h1 className="text-5xl font-bold leading-[1.04] tracking-[-0.055em] sm:text-6xl lg:text-7xl">
-            Card Nest
-            <span className="mt-3 block text-3xl font-bold leading-[1.15] tracking-[-0.035em] text-[#079cb8] sm:text-4xl">
-              Business card scanner and contact manager
-            </span>
-          </h1>
+          {/* The H1 must be exactly the OAuth application name — no descriptor words —
+              so automated name-match verification cannot read a different app name. */}
+          <h1 className="text-5xl font-bold leading-[1.04] tracking-[-0.055em] sm:text-6xl lg:text-7xl">Card Nest</h1>
+          <p className="mt-3 text-3xl font-bold leading-[1.15] tracking-[-0.035em] text-[#079cb8] sm:text-4xl">
+            Business card scanner and contact manager
+          </p>
           <p className="mt-7 max-w-2xl text-lg leading-8 text-[#526a70] sm:text-xl">
             Card Nest is an Android and iOS business card scanner and contact manager. Take a photo of a physical
             business card and Card Nest uses your selected AI provider to extract contact details such as names, phone
