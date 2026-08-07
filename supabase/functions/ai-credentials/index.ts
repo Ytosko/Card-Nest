@@ -31,7 +31,6 @@ async function encryptApiKey(plaintext: string): Promise<{ ciphertext: string; i
   const encryptedBuffer = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: ivBytes }, key, encodedText);
   const encryptedArray = new Uint8Array(encryptedBuffer);
 
-  // AES-GCM output in Web Crypto combines ciphertext + 16-byte auth tag at the end
   const tagLength = 16;
   const ciphertextBytes = encryptedArray.slice(0, encryptedArray.length - tagLength);
   const tagBytes = encryptedArray.slice(encryptedArray.length - tagLength);
@@ -119,7 +118,7 @@ Deno.serve(async (request) => {
   if (request.method === 'POST') {
     try {
       const body = await request.json();
-      const { provider, apiKey } = body;
+      const { provider, apiKey, skipTest } = body;
 
       if (!provider || !['openai', 'gemini'].includes(provider)) {
         return json({ error: 'Invalid provider.' }, 400);
@@ -140,9 +139,11 @@ Deno.serve(async (request) => {
       }
 
       const cleanKey = apiKey.trim();
-      const isValid = await testProviderKey(provider, cleanKey);
-      if (!isValid) {
-        return json({ error: 'The provided key could not be verified with ' + provider + '.' }, 400);
+      if (!skipTest) {
+        const isValid = await testProviderKey(provider, cleanKey);
+        if (!isValid) {
+          return json({ error: 'The provided key could not be verified with ' + provider + '.' }, 400);
+        }
       }
 
       const { ciphertext, iv, authTag, keySuffix } = await encryptApiKey(cleanKey);
