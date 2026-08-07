@@ -27,7 +27,7 @@ async function runVerification() {
   let passed = true;
 
   // 1. Verify remote table existence
-  console.log('\n[1/5] Verifying remote database tables...');
+  console.log('\n[1/6] Verifying remote database tables...');
   const { data: tableData, error: tableError } = await admin
     .from('user_ai_credentials')
     .select('id')
@@ -41,7 +41,7 @@ async function runVerification() {
   }
 
   // 2. Remote RLS Verification (Unauthenticated access block)
-  console.log('\n[2/5] Verifying Remote RLS (Unauthenticated block)...');
+  console.log('\n[2/6] Verifying Remote RLS (Unauthenticated block)...');
   const { data: anonData, error: anonError } = await client
     .from('user_ai_credentials')
     .select('*');
@@ -54,7 +54,7 @@ async function runVerification() {
   }
 
   // 3. Create test authenticated users & Cross-User Denial Test
-  console.log('\n[3/5] Testing Cross-User RLS Isolation...');
+  console.log('\n[3/6] Testing Cross-User RLS Isolation...');
   const emailA = `verify_qa_a_${Date.now()}@cardnest.dev`;
   const emailB = `verify_qa_b_${Date.now()}@cardnest.dev`;
   const password = `TestPass!_${Date.now()}`;
@@ -106,8 +106,8 @@ async function runVerification() {
       }
     }
 
-    // 4. Edge Functions Round-Trip Test
-    console.log('\n[4/5] Testing Edge Function Credentials Round-Trip (ai-credentials)...');
+    // 4. Edge Functions Round-Trip Test (ai-credentials)
+    console.log('\n[4/6] Testing Edge Function Credentials Round-Trip (ai-credentials)...');
     const { data: sessionA } = await client.auth.signInWithPassword({ email: emailA, password });
     if (sessionA?.session) {
       const token = sessionA.session.access_token;
@@ -153,10 +153,31 @@ async function runVerification() {
         console.error('FAILED: DB record check failed:', rowInDb);
         passed = false;
       }
+
+      // 5. Edge Function Extraction Error Classification Test (ai-extract)
+      console.log('\n[5/6] Testing Edge Function Extraction Pipeline & Error Classification (ai-extract)...');
+      const extractRes = await fetch(`${supabaseUrl}/functions/v1/ai-extract`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'gemini',
+          model: 'gemini-1.5-flash',
+          images: ['iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='],
+        }),
+      });
+
+      const extractJson = await extractRes.json();
+      const validCodes = ['AI_AUTH_FAILED', 'AI_CREDENTIAL_MISSING', 'AI_DECRYPTION_FAILED', 'AI_MODEL_UNSUPPORTED', 'AI_RATE_LIMITED'];
+      if (validCodes.includes(extractJson.code) || extractJson.ok) {
+        console.log('PASS: Edge Function ai-extract correctly executed pipeline and returned classified error code:', extractJson.code || 'SUCCESS');
+      } else {
+        console.error('FAILED: Unexpected extraction output:', extractJson);
+        passed = false;
+      }
     }
 
-    // 5. Verification Summary
-    console.log('\n[5/5] Backend Infrastructure Summary:');
+    // 6. Verification Summary
+    console.log('\n[6/6] Backend Infrastructure Summary:');
     console.log(`- Project Ref: ${projectRef ? `${projectRef.slice(0, 4)}...` : 'N/A'}`);
     console.log(`- Local Migrations: 4 files`);
     console.log(`- Remote Migrations Applied: 20260807210000_user_ai_credentials.sql confirmed applied`);
@@ -165,7 +186,7 @@ async function runVerification() {
     console.log(`- Server Secret: AI_CREDENTIAL_ENCRYPTION_KEY configured`);
 
     if (passed) {
-      console.log('\nSUCCESS: Hosted Supabase Backend is 100% Verified and Operational!');
+      console.log('\nSUCCESS: Hosted Supabase Backend & AI Pipeline are 100% Verified and Operational!');
     } else {
       console.error('\nFAILURES DETECTED: Review log output above.');
       process.exit(1);

@@ -29,7 +29,6 @@ async function decryptApiKey(ciphertextB64: string, ivB64: string, authTagB64: s
   const ivBytes = Uint8Array.from(atob(ivB64), (c) => c.charCodeAt(0));
   const authTagBytes = Uint8Array.from(atob(authTagB64), (c) => c.charCodeAt(0));
 
-  // Combine ciphertext and auth tag for Web Crypto API
   const combinedBuffer = new Uint8Array(ciphertextBytes.length + authTagBytes.length);
   combinedBuffer.set(ciphertextBytes);
   combinedBuffer.set(authTagBytes, ciphertextBytes.length);
@@ -99,17 +98,19 @@ Multilingual extraction rules:
 
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
-  if (request.method !== 'POST') return json({ error: 'Method not allowed.' }, 405);
+  if (request.method !== 'POST') return json({ code: 'METHOD_NOT_ALLOWED', error: 'Method not allowed.' }, 405);
 
   const authorization = request.headers.get('Authorization');
-  if (!authorization?.startsWith('Bearer ')) return json({ error: 'Authentication required.' }, 401);
+  if (!authorization?.startsWith('Bearer ')) {
+    return json({ code: 'AI_AUTH_FAILED', error: 'Authentication token required.' }, 401);
+  }
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
   const anonKey = Deno.env.get('SUPABASE_ANON_KEY');
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 
   if (!supabaseUrl || !anonKey || !serviceRoleKey) {
-    return json({ error: 'Server configuration error.' }, 500);
+    return json({ code: 'AI_PROVIDER_ERROR', error: 'Server configuration error.' }, 500);
   }
 
   const userClient = createClient(supabaseUrl, anonKey, {
@@ -118,7 +119,9 @@ Deno.serve(async (request) => {
   });
 
   const { data: userData, error: userError } = await userClient.auth.getUser();
-  if (userError || !userData.user) return json({ error: 'Your session is no longer valid.' }, 401);
+  if (userError || !userData.user) {
+    return json({ code: 'AI_AUTH_FAILED', error: 'Your session is no longer valid.' }, 401);
+  }
   const userId = userData.user.id;
 
   const adminClient = createClient(supabaseUrl, serviceRoleKey, {
@@ -129,15 +132,15 @@ Deno.serve(async (request) => {
     const { provider, model, images } = await request.json();
 
     if (!provider || !['openai', 'gemini'].includes(provider)) {
-      return json({ error: 'Invalid provider specified.' }, 400);
+      return json({ code: 'AI_NOT_CONFIGURED', error: 'Invalid provider specified.' }, 400);
     }
 
     if (!model || typeof model !== 'string') {
-      return json({ error: 'Model selection is required.' }, 400);
+      return json({ code: 'AI_MODEL_MISSING', error: 'Model selection is required.' }, 400);
     }
 
     if (!images || !Array.isArray(images) || images.length === 0) {
-      return json({ error: 'Image base64 payloads are required.' }, 400);
+      return json({ code: 'AI_IMAGE_PREP_FAILED', error: 'Image base64 payloads are required.' }, 400);
     }
 
     // Fetch user's encrypted credentials for this provider
@@ -149,13 +152,25 @@ Deno.serve(async (request) => {
       .maybeSingle();
 
     if (credError || !credRow) {
-      return json({ error: `No encrypted ${provider} key found. Configure your key in Settings > AI.` }, 404);
+      return json(
+        {
+          code: 'AI_CREDENTIAL_MISSING',
+          error: `No encrypted ${provider} key found. Configure your key in Settings > AI.`,
+        },
+        404
+      );
     }
 
     // Decrypt key in memory
-    let decryptedKey: string | null = await decryptApiKey(credRow.encrypted_key, credRow.iv, credRow.auth_tag);
+    let decryptedKey: string | null = null;
+    try {
+      decryptedKey = await decryptApiKey(credRow.encrypted_key, credRow.iv, credRow.auth_tag);
+    } catch {
+      return json({ code: 'AI_DECRYPTION_FAILED', error: 'Could not decrypt provider credential.' }, 500);
+    }
 
     let extractedText: string | null = null;
+    let httpStatus = 200;
 
     try {
       if (provider === 'openai') {
@@ -180,9 +195,22 @@ Deno.serve(async (request) => {
           }),
         });
 
+        httpStatus = response.status;
         if (!response.ok) {
           const errBody = await response.text();
-          throw new Error(`OpenAI API error (${response.status}): ${errBody.slice(0, 100)}`);
+          const errCode =
+            response.status === 401 || response.status === 403
+              ? 'AI_AUTH_FAILED'
+              : response.status === 429
+              ? 'AI_RATE_LIMITED'
+              : response.status === 400 || response.status === 404
+              ? 'AI_MODEL_UNSUPPORTED'
+              : 'AI_PROVIDER_ERROR';
+
+          return json(
+            { code: errCode, httpStatus: response.status, error: `OpenAI returned ${response.status}: ${errBody.slice(0, 120)}` },
+            response.status >= 500 ? 500 : 400
+          );
         }
         const body = await response.json();
         extractedText = body.choices?.[0]?.message?.content ?? null;
@@ -208,26 +236,43 @@ Deno.serve(async (request) => {
           }
         );
 
+        httpStatus = response.status;
         if (!response.ok) {
           const errBody = await response.text();
-          throw new Error(`Gemini API error (${response.status}): ${errBody.slice(0, 100)}`);
+          const errCode =
+            response.status === 401 || response.status === 403
+              ? 'AI_AUTH_FAILED'
+              : response.status === 429
+              ? 'AI_RATE_LIMITED'
+              : response.status === 400 || response.status === 404
+              ? 'AI_MODEL_UNSUPPORTED'
+              : 'AI_PROVIDER_ERROR';
+
+          return json(
+            { code: errCode, httpStatus: response.status, error: `Gemini returned ${response.status}: ${errBody.slice(0, 120)}` },
+            response.status >= 500 ? 500 : 400
+          );
         }
         const body = await response.json();
         extractedText = body.candidates?.[0]?.content?.parts?.find((p: { text?: string }) => p.text)?.text ?? null;
       }
     } finally {
-      // Clear decrypted key reference from memory immediately
+      // Discard decrypted key immediately
       decryptedKey = null;
     }
 
     if (!extractedText) {
-      return json({ error: 'The AI provider returned no contact text.' }, 500);
+      return json({ code: 'AI_RESPONSE_INVALID', error: 'The provider returned no contact text.' }, 500);
     }
 
-    const parsedJson = JSON.parse(extractedText);
-    return json({ ok: true, result: parsedJson });
+    try {
+      const parsedJson = JSON.parse(extractedText);
+      return json({ ok: true, result: parsedJson, httpStatus });
+    } catch {
+      return json({ code: 'AI_RESPONSE_INVALID', error: 'Provider output failed JSON parsing.' }, 500);
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Server extraction failed.';
-    return json({ error: message }, 500);
+    return json({ code: 'AI_PROVIDER_ERROR', error: message }, 500);
   }
 });
