@@ -68,6 +68,16 @@ const fileList = execFileSync(
   .split('\0')
   .filter(Boolean);
 
+// Known-benign literals that intentionally imitate credential formats (QA fixtures).
+// Never add a real credential here.
+const allowlistedDummies = ['sk-proj-dummyKeyForQA1234'];
+
+function stripAllowlisted(source) {
+  let output = source;
+  for (const dummy of allowlistedDummies) output = output.split(dummy).join('');
+  return output;
+}
+
 const findings = [];
 const credentialPatterns = [
   ['OpenAI API key pattern', /\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b/u],
@@ -98,7 +108,7 @@ for (const file of fileList) {
   }
 
   for (const [label, pattern] of credentialPatterns) {
-    if (pattern.test(source)) {
+    if (pattern.test(stripAllowlisted(source))) {
       findings.push(`${file}: matches ${label}`);
     }
   }
@@ -110,7 +120,8 @@ const commits = execFileSync('git', ['rev-list', '--all'], { encoding: 'utf8' })
 
 function scanHistory(args, label) {
   for (const commit of commits) {
-    const result = spawnSync('git', ['grep', '-I', '-l', ...args, commit, '--', '.'], {
+    // Match at line level (no -l) so allowlisted QA fixtures can be excluded by content.
+    const result = spawnSync('git', ['grep', '-I', ...args, commit, '--', '.'], {
       encoding: 'utf8',
     });
 
@@ -120,8 +131,18 @@ function scanHistory(args, label) {
       process.exit(1);
     }
 
-    for (const match of result.stdout.split(/\r?\n/u).filter(Boolean)) {
-      const path = match.replace(`${commit}:`, '');
+    const flaggedPaths = new Set();
+    for (const line of result.stdout.split(/\r?\n/u).filter(Boolean)) {
+      const withoutCommit = line.startsWith(`${commit}:`) ? line.slice(commit.length + 1) : line;
+      const separator = withoutCommit.indexOf(':');
+      if (separator < 1) continue;
+      const path = withoutCommit.slice(0, separator);
+      const content = withoutCommit.slice(separator + 1);
+      if (allowlistedDummies.some((dummy) => content.includes(dummy))) continue;
+      flaggedPaths.add(path);
+    }
+
+    for (const path of flaggedPaths) {
       findings.push(`${commit.slice(0, 12)}:${path}: historical ${label}`);
     }
   }

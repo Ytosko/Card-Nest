@@ -18,15 +18,33 @@ export type NativeContactMatch = {
   nativeContactId?: string;
 };
 
+type RelationEmail = { email: string; label: string | null; is_primary: boolean | null };
+type RelationPhone = { phone_number: string; label: string | null; is_primary: boolean | null };
+
+function cardEmails(card: Card | CardWithRelations): RelationEmail[] {
+  if ('card_emails' in card && Array.isArray(card.card_emails) && card.card_emails.length > 0) {
+    return card.card_emails;
+  }
+  return card.primary_email ? [{ email: card.primary_email, label: 'work', is_primary: true }] : [];
+}
+
+function cardPhones(card: Card | CardWithRelations): RelationPhone[] {
+  if ('card_phone_numbers' in card && Array.isArray(card.card_phone_numbers) && card.card_phone_numbers.length > 0) {
+    return card.card_phone_numbers;
+  }
+  return card.primary_phone ? [{ phone_number: card.primary_phone, label: 'work', is_primary: true }] : [];
+}
+
 export async function checkNativeContactMatch(card: Card | CardWithRelations): Promise<NativeContactMatch> {
   try {
     const permission = await Contacts.getPermissionsAsync();
     if (!permission.granted) return { isMatched: false };
 
-    const cardEmail = normalizeEmail(card.primary_email);
-    const cardPhone = normalizePhone(card.primary_phone);
+    // Every phone/email on the card counts for matching — not just the primary values.
+    const emailSet = new Set(cardEmails(card).map((e) => normalizeEmail(e.email)).filter(Boolean));
+    const phoneSet = new Set(cardPhones(card).map((p) => normalizePhone(p.phone_number)).filter(Boolean));
 
-    if (!cardEmail && !cardPhone) return { isMatched: false };
+    if (emailSet.size === 0 && phoneSet.size === 0) return { isMatched: false };
 
     const { data: nativeContacts } = await Contacts.getContactsAsync({
       fields: [Contacts.Fields.Emails, Contacts.Fields.PhoneNumbers],
@@ -36,17 +54,17 @@ export async function checkNativeContactMatch(card: Card | CardWithRelations): P
     if (!nativeContacts || nativeContacts.length === 0) return { isMatched: false };
 
     for (const native of nativeContacts) {
-      if (cardEmail && native.emails) {
+      if (emailSet.size > 0 && native.emails) {
         for (const e of native.emails) {
-          if (e.email && normalizeEmail(e.email) === cardEmail) {
+          if (e.email && emailSet.has(normalizeEmail(e.email))) {
             return { isMatched: true, nativeContactId: native.id };
           }
         }
       }
 
-      if (cardPhone && native.phoneNumbers) {
+      if (phoneSet.size > 0 && native.phoneNumbers) {
         for (const p of native.phoneNumbers) {
-          if (p.number && normalizePhone(p.number) === cardPhone) {
+          if (p.number && phoneSet.has(normalizePhone(p.number))) {
             return { isMatched: true, nativeContactId: native.id };
           }
         }
@@ -76,8 +94,26 @@ export async function exportCardToContacts(card: Card | CardWithRelations) {
     company: card.company ?? undefined,
     jobTitle: card.job_title ?? undefined,
     note: card.notes ?? undefined,
-    emails: card.primary_email ? [{ email: card.primary_email, label: 'work', isPrimary: true }] : undefined,
-    phoneNumbers: card.primary_phone ? [{ number: card.primary_phone, label: 'work', isPrimary: true }] : undefined,
+    emails: (() => {
+      const emails = cardEmails(card);
+      return emails.length
+        ? emails.map((e) => ({
+            email: e.email,
+            label: (e.label || 'work').toLowerCase(),
+            isPrimary: Boolean(e.is_primary),
+          }))
+        : undefined;
+    })(),
+    phoneNumbers: (() => {
+      const phones = cardPhones(card);
+      return phones.length
+        ? phones.map((p) => ({
+            number: p.phone_number,
+            label: (p.label || 'work').toLowerCase(),
+            isPrimary: Boolean(p.is_primary),
+          }))
+        : undefined;
+    })(),
     addresses: address
       ? [
           {

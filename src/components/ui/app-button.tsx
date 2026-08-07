@@ -9,9 +9,10 @@ type Props = Omit<ComponentProps<typeof Pressable>, 'children'> & {
   children: ReactNode;
   loading?: boolean;
   variant?: 'primary' | 'secondary';
+  textColor?: string;
 };
 
-export function AppButton({ children, disabled, loading = false, variant = 'primary', style, ...props }: Props) {
+export function AppButton({ children, disabled, loading = false, variant = 'primary', textColor, style, ...props }: Props) {
   const theme = useAppTheme();
   const isDisabled = disabled || loading;
 
@@ -41,11 +42,11 @@ export function AppButton({ children, disabled, loading = false, variant = 'prim
       {...props}>
       <View style={styles.content}>
         {loading ? (
-          <ActivityIndicator color={variant === 'primary' ? theme.colors.textOnBrand : theme.colors.primary} />
+          <ActivityIndicator color={textColor ?? (variant === 'primary' ? theme.colors.textOnBrand : theme.colors.primary)} />
         ) : null}
         <AppText
           variant="label"
-          style={{ color: variant === 'primary' ? theme.colors.textOnBrand : theme.colors.primary }}>
+          style={{ color: textColor ?? (variant === 'primary' ? theme.colors.textOnBrand : theme.colors.primary) }}>
           {children}
         </AppText>
       </View>

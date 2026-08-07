@@ -12,9 +12,17 @@ import type { Card } from '@/src/types/database.helpers';
 export function CardListRow({
   card,
   onPress,
+  isSelectionMode = false,
+  isSelected = false,
+  onSelectToggle,
+  onLongPress,
 }: {
   card: Card;
   onPress: () => void;
+  isSelectionMode?: boolean;
+  isSelected?: boolean;
+  onSelectToggle?: () => void;
+  onLongPress?: () => void;
 }) {
   const theme = useAppTheme();
   const queryClient = useQueryClient();
@@ -39,22 +47,40 @@ export function CardListRow({
     card.primary_email ||
     'Contact details';
 
+  const handleRowPress = () => {
+    if (isSelectionMode) {
+      onSelectToggle?.();
+    } else {
+      onPress();
+    }
+  };
+
   return (
     <Pressable
-      accessibilityHint="Opens contact details"
+      accessibilityHint={isSelectionMode ? (isSelected ? 'Deselect contact' : 'Select contact') : 'Opens contact details'}
       accessibilityLabel={`${card.display_name ?? card.company ?? 'Unnamed contact'}${card.company ? `, ${card.company}` : ''}`}
       accessibilityRole="button"
-      onPress={onPress}
+      onLongPress={onLongPress}
+      onPress={handleRowPress}
       style={({ pressed }) => [
         styles.row,
         {
-          backgroundColor: theme.colors.surface,
-          borderColor: theme.colors.border,
+          backgroundColor: isSelected ? theme.colors.primarySoft : theme.colors.surface,
+          borderColor: isSelected ? theme.colors.primary : theme.colors.border,
           borderRadius: theme.radii.lg,
           opacity: pressed ? 0.72 : 1,
           padding: theme.spacing[4],
         },
       ]}>
+      {/* Checkbox indicator in selection mode */}
+      {isSelectionMode ? (
+        <MaterialCommunityIcons
+          color={isSelected ? theme.colors.primary : theme.colors.textMuted}
+          name={isSelected ? 'checkbox-marked-circle' : 'checkbox-blank-circle-outline'}
+          size={24}
+        />
+      ) : null}
+
       <ContactAvatar
         company={card.company}
         contactPhotoPath={card.contact_photo_path}
@@ -84,20 +110,24 @@ export function CardListRow({
         </AppText>
       </View>
 
-      <Pressable
-        accessibilityLabel={card.is_favorite ? 'Remove from favorites' : 'Add to favorites'}
-        accessibilityRole="button"
-        hitSlop={12}
-        onPress={(e) => void handleToggleFavorite(e)}
-        style={styles.favoriteButton}>
-        <MaterialCommunityIcons
-          color={card.is_favorite ? theme.colors.warning : theme.colors.textMuted}
-          name={card.is_favorite ? 'star' : 'star-outline'}
-          size={22}
-        />
-      </Pressable>
+      {!isSelectionMode ? (
+        <>
+          <Pressable
+            accessibilityLabel={card.is_favorite ? 'Remove from favorites' : 'Add to favorites'}
+            accessibilityRole="button"
+            hitSlop={12}
+            onPress={(e) => void handleToggleFavorite(e)}
+            style={styles.favoriteButton}>
+            <MaterialCommunityIcons
+              color={card.is_favorite ? theme.colors.warning : theme.colors.textMuted}
+              name={card.is_favorite ? 'star' : 'star-outline'}
+              size={22}
+            />
+          </Pressable>
 
-      <MaterialCommunityIcons color={theme.colors.textMuted} name="chevron-right" size={22} />
+          <MaterialCommunityIcons color={theme.colors.textMuted} name="chevron-right" size={22} />
+        </>
+      ) : null}
     </Pressable>
   );
 }

@@ -1,7 +1,18 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { useQueryClient } from '@tanstack/react-query';
+import * as Haptics from 'expo-haptics';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  FlatList,
+  Modal,
+  Pressable,
+  RefreshControl,
+  StyleSheet,
+  TextInput,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BrandMark } from '@/src/components/brand-mark';
@@ -11,8 +22,10 @@ import { EmptyState } from '@/src/components/ui/empty-state';
 import { UserAvatar } from '@/src/components/ui/user-avatar';
 import { AuthNotice } from '@/src/features/auth/components/auth-notice';
 import { useAuth } from '@/src/features/auth/auth-provider';
-import { useCards } from '@/src/features/cards/card-hooks';
+import { cardKeys, useCards } from '@/src/features/cards/card-hooks';
 import { CardListRow } from '@/src/features/cards/components/card-list-row';
+import { bulkDeleteCards, bulkToggleFavorite, markCardExported } from '@/src/features/cards/card-service';
+import { exportCardToContacts } from '@/src/features/contacts/contact-export';
 import { useCaptureQueue } from '@/src/features/capture/capture-queue-provider';
 import { useAppTheme } from '@/src/theme/theme-provider';
 
@@ -26,17 +39,43 @@ export default function ContactsScreen() {
   const { profile, user } = useAuth();
   const cardsQuery = useCards();
   const queue = useCaptureQueue();
+  const queryClient = useQueryClient();
 
   const [input, setInput] = useState('');
   const [activeChip, setActiveChip] = useState<FilterChipMode>('all');
   const [sortMode, setSortMode] = useState<SortMode>('recent');
 
+  // Multi-select state
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isDeletingBulk, setIsDeletingBulk] = useState(false);
+  const [isProcessingBulk, setIsProcessingBulk] = useState(false);
+  const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
+
+  const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
+  const [noticeTone, setNoticeTone] = useState<'info' | 'success' | 'error'>('info');
+
   const pendingQueue = queue.items.filter((item) => item.state !== 'synced');
-  const rawCards = cardsQuery.data ?? [];
+
+  // Saved contacts only — extractions still awaiting Review → Save are surfaced separately
+  // and never mixed into the contact library.
+  const rawCards = useMemo(
+    () => (cardsQuery.data ?? []).filter((card) => card.status === 'ready'),
+    [cardsQuery.data]
+  );
+  const reviewCards = useMemo(
+    () =>
+      (cardsQuery.data ?? []).filter((card) => {
+        if (card.status !== 'review') return false;
+        const quality = card.extraction_quality as { failed?: boolean } | null;
+        return !quality?.failed;
+      }),
+    [cardsQuery.data]
+  );
 
   // Instant live client-side search & filtering across all fields
   const filteredCards = useMemo(() => {
-    const list = cardsQuery.data ?? [];
+    const list = rawCards;
     const query = input.trim().toLowerCase();
 
     return list
@@ -81,17 +120,177 @@ export default function ContactsScreen() {
           const nameB = (b.display_name || b.company || '').toLowerCase();
           return nameA.localeCompare(nameB);
         }
-        // Default sort: most recently updated / added first
         return (b.updated_at || b.created_at).localeCompare(a.updated_at || a.created_at);
       });
-  }, [cardsQuery.data, input, activeChip, sortMode]);
+  }, [rawCards, input, activeChip, sortMode]);
 
   const hasAnyContacts = rawCards.length > 0;
+  const hasAnyRecords = hasAnyContacts || reviewCards.length > 0 || pendingQueue.length > 0;
+  const selectedCount = selectedIds.size;
+  const isAllFilteredSelected = filteredCards.length > 0 && filteredCards.every((c) => selectedIds.has(c.id));
+
+  // Selection mode helpers
+  function enterSelectionMode(initialCardId?: string) {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined);
+    setIsSelectionMode(true);
+    if (initialCardId) {
+      setSelectedIds(new Set([initialCardId]));
+    }
+  }
+
+  function exitSelectionMode() {
+    setIsSelectionMode(false);
+    setSelectedIds(new Set());
+  }
+
+  function toggleCardSelection(cardId: string) {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(cardId)) {
+        next.delete(cardId);
+      } else {
+        next.add(cardId);
+      }
+      return next;
+    });
+  }
+
+  function toggleSelectAllFiltered() {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
+    if (isAllFilteredSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredCards.map((c) => c.id)));
+    }
+  }
+
+  // Bulk Operations
+  async function handleBulkFavorite(targetState: boolean) {
+    if (selectedCount === 0) return;
+    setIsProcessingBulk(true);
+    setNoticeMessage(null);
+    try {
+      await bulkToggleFavorite(Array.from(selectedIds), targetState);
+      await queryClient.invalidateQueries({ queryKey: cardKeys.all });
+      setNoticeTone('success');
+      setNoticeMessage(
+        `${selectedCount} ${selectedCount === 1 ? 'contact' : 'contacts'} ${
+          targetState ? 'added to favorites' : 'removed from favorites'
+        }.`
+      );
+      exitSelectionMode();
+    } catch {
+      setNoticeTone('error');
+      setNoticeMessage('Could not update favorite status for selected contacts.');
+    } finally {
+      setIsProcessingBulk(false);
+    }
+  }
+
+  async function handleBulkExportToContacts() {
+    if (selectedCount === 0) return;
+    setIsProcessingBulk(true);
+    setNoticeMessage(null);
+    try {
+      const selectedCards = rawCards.filter((c) => selectedIds.has(c.id));
+      let exportedCount = 0;
+      let skippedCount = 0;
+
+      for (const card of selectedCards) {
+        try {
+          await exportCardToContacts(card);
+          await markCardExported(card.id).catch(() => undefined);
+          exportedCount++;
+        } catch {
+          skippedCount++;
+        }
+      }
+
+      await queryClient.invalidateQueries({ queryKey: cardKeys.all });
+      setNoticeTone('success');
+      setNoticeMessage(
+        `${exportedCount} ${exportedCount === 1 ? 'contact' : 'contacts'} saved to your phone` +
+          (skippedCount > 0 ? ` (${skippedCount} skipped)` : '') +
+          '.'
+      );
+      exitSelectionMode();
+    } catch {
+      setNoticeTone('error');
+      setNoticeMessage('Could not export selected contacts to phone contacts.');
+    } finally {
+      setIsProcessingBulk(false);
+    }
+  }
+
+  async function executeBulkDelete() {
+    setDeleteConfirmVisible(false);
+    if (selectedCount === 0) return;
+
+    setIsDeletingBulk(true);
+    setNoticeMessage(null);
+
+    const selectedCards = rawCards.filter((c) => selectedIds.has(c.id));
+    const { deletedCount, failedIds } = await bulkDeleteCards(selectedCards);
+
+    await queryClient.invalidateQueries({ queryKey: cardKeys.all });
+    setIsDeletingBulk(false);
+
+    if (failedIds.length === 0) {
+      setNoticeTone('success');
+      setNoticeMessage(`${deletedCount} ${deletedCount === 1 ? 'contact' : 'contacts'} deleted.`);
+      exitSelectionMode();
+    } else {
+      setSelectedIds(new Set(failedIds));
+      setNoticeTone('error');
+      setNoticeMessage(`${deletedCount} deleted · ${failedIds.length} couldn't be deleted.`);
+    }
+  }
 
   return (
     <SafeAreaView edges={['top']} style={[styles.safeArea, { backgroundColor: theme.colors.background }]}>
+      {/* Blocking Progress Modal for Bulk Delete */}
+      <Modal animationType="fade" transparent visible={isDeletingBulk}>
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalBox, { backgroundColor: theme.colors.surface, borderRadius: theme.radii.lg }]}>
+            <ActivityIndicator color={theme.colors.danger} size="large" />
+            <AppText variant="title">Deleting {selectedCount} contacts…</AppText>
+            <AppText muted variant="caption">
+              Permanently removing contact records and private card images
+            </AppText>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Bulk Delete Confirmation Dialog */}
+      <Modal animationType="fade" transparent visible={deleteConfirmVisible}>
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalBox, { backgroundColor: theme.colors.surface, borderRadius: theme.radii.lg }]}>
+            <MaterialCommunityIcons color={theme.colors.danger} name="trash-can-outline" size={32} />
+            <AppText variant="title" style={{ textAlign: 'center' }}>
+              Delete {selectedCount} {selectedCount === 1 ? 'contact' : 'contacts'}?
+            </AppText>
+            <AppText muted variant="caption" style={{ textAlign: 'center' }}>
+              This will permanently remove the selected contacts and their saved card images from Card Nest.
+            </AppText>
+            <View style={{ gap: 8, width: '100%', marginTop: 8 }}>
+              <AppButton onPress={() => void executeBulkDelete()} style={{ backgroundColor: theme.colors.danger }}>
+                Delete {selectedCount} {selectedCount === 1 ? 'contact' : 'contacts'}
+              </AppButton>
+              <AppButton onPress={() => setDeleteConfirmVisible(false)} variant="secondary">
+                Cancel
+              </AppButton>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       <FlatList
-        contentContainerStyle={[styles.content, { gap: theme.spacing[3], padding: theme.spacing[5] }, !hasAnyContacts && styles.grow]}
+        contentContainerStyle={[
+          styles.content,
+          { gap: theme.spacing[3], padding: theme.spacing[5] },
+          !hasAnyContacts && styles.grow,
+        ]}
         data={filteredCards}
         keyExtractor={(item) => item.id}
         keyboardShouldPersistTaps="handled"
@@ -106,6 +305,12 @@ export default function ContactsScreen() {
             />
           ) : activeChip !== 'all' && hasAnyContacts ? (
             <EmptyState body="Select another filter chip to see your saved contacts." icon="filter-variant" title="Nothing in this view" />
+          ) : hasAnyRecords ? (
+            <EmptyState
+              body="A scanned card is waiting above. Review and save it to add it to your contact library."
+              icon="progress-check"
+              title="No saved contacts yet"
+            />
           ) : (
             <View style={[styles.emptyBox, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, borderRadius: theme.radii.lg, padding: theme.spacing[5] }]}>
               <View style={[styles.emptyIconWrap, { backgroundColor: theme.colors.primarySoft }]}>
@@ -125,20 +330,66 @@ export default function ContactsScreen() {
         }
         ListHeaderComponent={
           <View style={{ gap: theme.spacing[3] }}>
-            {/* Top Bar: Brand Mark + Profile Avatar */}
-            <View style={styles.topBar}>
-              <BrandMark compact />
-              <Pressable
-                accessibilityLabel="Open settings and profile"
-                onPress={() => router.push('/(app)/(tabs)/settings')}>
-                <UserAvatar avatarPath={profile?.avatar_path} displayName={profile?.display_name} email={user?.email} size={40} />
-              </Pressable>
-            </View>
+            {/* Header: Normal Mode vs Selection Mode */}
+            {isSelectionMode ? (
+              <View style={[styles.selectionHeader, { backgroundColor: theme.colors.surface, borderColor: theme.colors.primary }]}>
+                <View style={styles.selectionCountWrap}>
+                  <AppText variant="title" style={{ color: theme.colors.primary }}>
+                    {selectedCount} selected
+                  </AppText>
+                  <AppText muted variant="caption">
+                    out of {filteredCards.length} shown
+                  </AppText>
+                </View>
 
+                <View style={styles.selectionHeaderActions}>
+                  <Pressable
+                    accessibilityLabel={isAllFilteredSelected ? 'Deselect all' : 'Select all'}
+                    onPress={toggleSelectAllFiltered}
+                    style={[styles.headerBtn, { backgroundColor: theme.colors.primarySoft, borderColor: theme.colors.primary }]}>
+                    <AppText variant="caption" style={{ color: theme.colors.primary, fontWeight: '700' }}>
+                      {isAllFilteredSelected ? 'Deselect all' : 'Select all'}
+                    </AppText>
+                  </Pressable>
+
+                  <Pressable
+                    accessibilityLabel="Cancel selection mode"
+                    onPress={exitSelectionMode}
+                    style={[styles.headerBtn, { backgroundColor: theme.colors.background, borderColor: theme.colors.border }]}>
+                    <AppText variant="caption">Cancel</AppText>
+                  </Pressable>
+                </View>
+              </View>
+            ) : (
+              <View style={styles.topBar}>
+                <BrandMark compact />
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                  {hasAnyContacts ? (
+                    <Pressable
+                      accessibilityLabel="Enter selection mode to select contacts"
+                      onPress={() => enterSelectionMode()}
+                      style={[styles.selectChip, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+                      <MaterialCommunityIcons color={theme.colors.primary} name="checkbox-multiple-marked-outline" size={16} />
+                      <AppText variant="caption" style={{ color: theme.colors.primary, fontWeight: '600' }}>
+                        Select
+                      </AppText>
+                    </Pressable>
+                  ) : null}
+
+                  <Pressable
+                    accessibilityLabel="Open settings and profile"
+                    onPress={() => router.push('/(app)/(tabs)/settings')}>
+                    <UserAvatar avatarPath={profile?.avatar_path} displayName={profile?.display_name} email={user?.email} size={40} />
+                  </Pressable>
+                </View>
+              </View>
+            )}
+
+            {noticeMessage ? <AuthNotice message={noticeMessage} tone={noticeTone} /> : null}
             {params.confirmed === 'true' ? <AuthNotice message="Email confirmed. Your Card Nest is ready." tone="success" /> : null}
 
             {/* Sync / Offline Banner — Only shown when active sync queue exists */}
-            {pendingQueue.length > 0 ? (
+            {pendingQueue.length > 0 && !isSelectionMode ? (
               <Pressable
                 accessibilityLabel="View sync queue status"
                 onPress={() => router.push('/(app)/settings/queue')}
@@ -155,6 +406,26 @@ export default function ContactsScreen() {
                 <MaterialCommunityIcons color={theme.colors.primary} name="chevron-right" size={20} />
               </Pressable>
             ) : null}
+
+            {/* Needs Review — extracted cards not yet saved as contacts */}
+            {reviewCards.length > 0 && !isSelectionMode
+              ? reviewCards.map((reviewCard) => (
+                  <Pressable
+                    accessibilityLabel={`Review extracted contact ${reviewCard.display_name ?? 'New business card'}`}
+                    key={reviewCard.id}
+                    onPress={() => router.push({ pathname: '/(app)/cards/[id]/edit', params: { id: reviewCard.id } })}
+                    style={[styles.reviewBanner, { backgroundColor: theme.colors.warningSoft, borderColor: theme.colors.warning }]}>
+                    <MaterialCommunityIcons color={theme.colors.warning} name="file-document-edit-outline" size={20} />
+                    <View style={{ flex: 1 }}>
+                      <AppText variant="label">{reviewCard.display_name ?? 'New business card'}</AppText>
+                      <AppText muted variant="caption">
+                        Extraction ready · Tap to review and save
+                      </AppText>
+                    </View>
+                    <MaterialCommunityIcons color={theme.colors.warning} name="chevron-right" size={20} />
+                  </Pressable>
+                ))
+              : null}
 
             {/* Prominent Search Bar */}
             <View style={[styles.searchBar, { backgroundColor: theme.colors.surface, borderColor: theme.colors.borderStrong }]}>
@@ -208,9 +479,79 @@ export default function ContactsScreen() {
         ListHeaderComponentStyle={{ marginBottom: theme.spacing[2] }}
         refreshControl={<RefreshControl refreshing={cardsQuery.isRefetching} onRefresh={() => void cardsQuery.refetch()} tintColor={theme.colors.primary} />}
         renderItem={({ item }) => (
-          <CardListRow card={item} onPress={() => router.push({ pathname: '/(app)/cards/[id]', params: { id: item.id } })} />
+          <CardListRow
+            card={item}
+            isSelectionMode={isSelectionMode}
+            isSelected={selectedIds.has(item.id)}
+            onLongPress={() => {
+              if (!isSelectionMode) {
+                enterSelectionMode(item.id);
+              } else {
+                toggleCardSelection(item.id);
+              }
+            }}
+            onPress={() => router.push({ pathname: '/(app)/cards/[id]', params: { id: item.id } })}
+            onSelectToggle={() => toggleCardSelection(item.id)}
+          />
         )}
       />
+
+      {/* Floating Bottom Bulk Action Toolbar */}
+      {isSelectionMode && selectedCount > 0 ? (
+        <View
+          style={[
+            styles.bulkToolbar,
+            {
+              backgroundColor: theme.colors.surface,
+              borderColor: theme.colors.primary,
+              borderRadius: theme.radii.lg,
+            },
+          ]}>
+          <Pressable
+            accessibilityLabel="Add selected contacts to favorites"
+            disabled={isProcessingBulk}
+            onPress={() => void handleBulkFavorite(true)}
+            style={styles.toolbarBtn}>
+            <MaterialCommunityIcons color={theme.colors.warning} name="star" size={20} />
+            <AppText variant="caption" style={{ fontSize: 11 }}>
+              Favorite
+            </AppText>
+          </Pressable>
+
+          <Pressable
+            accessibilityLabel="Remove selected contacts from favorites"
+            disabled={isProcessingBulk}
+            onPress={() => void handleBulkFavorite(false)}
+            style={styles.toolbarBtn}>
+            <MaterialCommunityIcons color={theme.colors.textMuted} name="star-outline" size={20} />
+            <AppText variant="caption" style={{ fontSize: 11 }}>
+              Unfavorite
+            </AppText>
+          </Pressable>
+
+          <Pressable
+            accessibilityLabel="Save selected contacts to phone contacts"
+            disabled={isProcessingBulk}
+            onPress={() => void handleBulkExportToContacts()}
+            style={styles.toolbarBtn}>
+            <MaterialCommunityIcons color={theme.colors.primary} name="account-plus-outline" size={20} />
+            <AppText variant="caption" style={{ fontSize: 11 }}>
+              Export
+            </AppText>
+          </Pressable>
+
+          <Pressable
+            accessibilityLabel={`Delete ${selectedCount} selected contacts`}
+            disabled={isProcessingBulk}
+            onPress={() => setDeleteConfirmVisible(true)}
+            style={[styles.toolbarBtn, { borderLeftWidth: 1, borderColor: theme.colors.border }]}>
+            <MaterialCommunityIcons color={theme.colors.danger} name="trash-can-outline" size={20} />
+            <AppText variant="caption" style={{ fontSize: 11, color: theme.colors.danger, fontWeight: '700' }}>
+              Delete ({selectedCount})
+            </AppText>
+          </Pressable>
+        </View>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -247,6 +588,25 @@ function FilterChip({
 }
 
 const styles = StyleSheet.create({
+  bulkToolbar: {
+    alignItems: 'center',
+    alignSelf: 'center',
+    bottom: 24,
+    borderWidth: 2,
+    elevation: 8,
+    flexDirection: 'row',
+    gap: 4,
+    justifyContent: 'space-around',
+    maxWidth: 720,
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+    position: 'absolute',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    width: '92%',
+  },
   chip: {
     alignItems: 'center',
     borderRadius: 999,
@@ -257,7 +617,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   chipsRow: { flex: 1, flexDirection: 'row', gap: 8 },
-  content: { alignSelf: 'center', maxWidth: 760, paddingBottom: 36, width: '100%' },
+  content: { alignSelf: 'center', maxWidth: 760, paddingBottom: 96, width: '100%' },
   controlsRow: { alignItems: 'center', flexDirection: 'row', gap: 8, justifyContent: 'space-between' },
   emptyBox: { alignItems: 'center', borderWidth: 1, gap: 14, marginTop: 12 },
   emptyIconWrap: {
@@ -268,8 +628,36 @@ const styles = StyleSheet.create({
     width: 64,
   },
   grow: { flexGrow: 1 },
+  headerBtn: {
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
   input: { flex: 1, fontSize: 16, minHeight: 48 },
   loader: { marginTop: 60 },
+  modalBackdrop: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    flex: 1,
+    justifyContent: 'center',
+    padding: 24,
+  },
+  modalBox: {
+    alignItems: 'center',
+    gap: 12,
+    maxWidth: 340,
+    padding: 24,
+    width: '100%',
+  },
+  reviewBanner: {
+    alignItems: 'center',
+    borderRadius: 12,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 12,
+    padding: 12,
+  },
   safeArea: { flex: 1 },
   searchBar: {
     alignItems: 'center',
@@ -280,6 +668,26 @@ const styles = StyleSheet.create({
     minHeight: 52,
     paddingHorizontal: 14,
   },
+  selectChip: {
+    alignItems: 'center',
+    borderRadius: 999,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  selectionCountWrap: { gap: 2 },
+  selectionHeader: {
+    alignItems: 'center',
+    borderRadius: 14,
+    borderWidth: 1.5,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  selectionHeaderActions: { flexDirection: 'row', gap: 8 },
   sortButton: {
     alignItems: 'center',
     borderRadius: 999,
@@ -295,6 +703,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     padding: 12,
+  },
+  toolbarBtn: {
+    alignItems: 'center',
+    flex: 1,
+    gap: 3,
+    justifyContent: 'center',
+    paddingVertical: 4,
   },
   topBar: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
 });

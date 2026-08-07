@@ -2,6 +2,7 @@ import { File } from 'expo-file-system';
 import * as ImageManipulator from 'expo-image-manipulator';
 
 import { supabase } from '@/src/lib/supabase/client';
+import { getCardImageStoragePath } from '@/src/lib/supabase/storage-paths';
 import type { Card, Tables, TablesUpdate } from '@/src/types/database.helpers';
 
 import { displayNameForDraft, type CardDraft } from './card-schema';
@@ -50,10 +51,12 @@ function cardValues(draft: CardDraft) {
 }
 
 export async function listCards(limit = 100) {
+  // Placeholder cards mid-capture (capture_pending/uploading/processing/failed) must never
+  // surface as contacts; only saved contacts and extractions awaiting review are listed.
   const { data, error } = await supabase
     .from('cards')
     .select('*, card_emails(*), card_phone_numbers(*), card_websites(*), card_addresses(*), card_images(*), card_tags(tags(*))')
-    .neq('status', 'archived')
+    .in('status', ['ready', 'review'])
     .order('updated_at', { ascending: false })
     .limit(limit);
   if (error) throw error;
@@ -224,6 +227,61 @@ export async function deleteCard(card: CardWithRelations | Card) {
   const { error } = await supabase.from('cards').delete().eq('id', card.id);
   if (error) throw error;
 }
+
+export async function bulkDeleteCards(cards: Card[]): Promise<{ deletedCount: number; failedIds: string[] }> {
+  let deletedCount = 0;
+  const failedIds: string[] = [];
+
+  for (const card of cards) {
+    try {
+      await deleteCard(card);
+      deletedCount++;
+    } catch {
+      failedIds.push(card.id);
+    }
+  }
+
+  return { deletedCount, failedIds };
+}
+
+export async function bulkToggleFavorite(cardIds: string[], isFavorite: boolean): Promise<void> {
+  if (cardIds.length === 0) return;
+  const { error } = await supabase.from('cards').update({ is_favorite: isFavorite }).in('id', cardIds);
+  if (error) throw error;
+}
+
+/**
+ * Removes the placeholder card record and any orphan cloud files created by a failed capture.
+ * Contacts saved through Review (status 'ready') are never touched — deleting a failed
+ * processing job must not destroy a valid contact. Related rows (card_images, processing_jobs,
+ * emails/phones/etc.) cascade with the card row.
+ */
+export async function deleteFailedCaptureArtifacts(cardId: string, userId: string): Promise<void> {
+  const { data: card, error } = await supabase
+    .from('cards')
+    .select('id, status, user_id, contact_photo_path, card_images(storage_path)')
+    .eq('id', cardId)
+    .maybeSingle();
+  if (error) throw error;
+  if (card && card.status === 'ready') return;
+
+  // Remove cloud images at both recorded and deterministic paths — an upload can succeed
+  // in Storage even when the card_images metadata row was never written.
+  const paths = new Set<string>([
+    ...(card?.card_images ?? []).map((image) => image.storage_path),
+    getCardImageStoragePath(userId, cardId, 'front', 'jpg'),
+    getCardImageStoragePath(userId, cardId, 'back', 'jpg'),
+  ]);
+  await supabase.storage.from('card-images').remove(Array.from(paths)).catch(() => undefined);
+
+  if (!card) return;
+  if (card.contact_photo_path) {
+    await supabase.storage.from('contact-photos').remove([card.contact_photo_path]).catch(() => undefined);
+  }
+  const { error: deleteError } = await supabase.from('cards').delete().eq('id', cardId);
+  if (deleteError) throw deleteError;
+}
+
 
 export async function uploadContactPhoto(cardId: string, userId: string, uri: string): Promise<string> {
   const resized = await ImageManipulator.manipulateAsync(

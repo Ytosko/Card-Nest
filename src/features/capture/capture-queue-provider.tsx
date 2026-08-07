@@ -13,6 +13,7 @@ import {
 
 import { useAuth } from '@/src/features/auth/auth-provider';
 import { runConfiguredExtraction } from '@/src/features/ai/extraction-service';
+import { deleteFailedCaptureArtifacts } from '@/src/features/cards/card-service';
 import { getCardImageStoragePath } from '@/src/lib/supabase/storage-paths';
 import { supabase } from '@/src/lib/supabase/client';
 
@@ -31,6 +32,11 @@ export type BulkRetryResult = {
   stillFailed: number;
 };
 
+export type BulkDeleteResult = {
+  deletedTotal: number;
+  failedTotal: number;
+};
+
 export type BulkProgressInfo = {
   current: number;
   total: number;
@@ -44,12 +50,15 @@ type CaptureQueueContextValue = {
   syncedCount: number;
   isProcessing: boolean;
   isRetryingBulk: boolean;
+  isDeletingFailed: boolean;
   bulkProgress: BulkProgressInfo | null;
   bulkSummaryNotice: string | null;
   enqueue: (frontUri: string, backUri?: string | null) => Promise<string>;
   refresh: () => Promise<void>;
   retry: (itemId?: string) => Promise<void>;
   retryAllFailed: () => Promise<BulkRetryResult>;
+  deleteFailed: (itemId: string) => Promise<void>;
+  deleteAllFailed: () => Promise<BulkDeleteResult>;
   dismissSynced: () => Promise<void>;
   clearSummaryNotice: () => void;
 };
@@ -62,6 +71,7 @@ export function CaptureQueueProvider({ children }: PropsWithChildren) {
   const [items, setItems] = useState<CaptureQueueItem[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isRetryingBulk, setIsRetryingBulk] = useState(false);
+  const [isDeletingFailed, setIsDeletingFailed] = useState(false);
   const [bulkProgress, setBulkProgress] = useState<BulkProgressInfo | null>(null);
   const [bulkSummaryNotice, setBulkSummaryNotice] = useState<string | null>(null);
 
@@ -257,6 +267,68 @@ export function CaptureQueueProvider({ children }: PropsWithChildren) {
     };
   }, [processQueueItem, refresh, user]);
 
+  const deleteFailedItem = useCallback(
+    async (item: CaptureQueueItem) => {
+      // Cloud cleanup first: orphan card images, draft extraction data, and the placeholder
+      // card record (never a contact already saved through Review). Related processing_jobs
+      // rows cascade with the card record.
+      await deleteFailedCaptureArtifacts(item.cardId, item.userId);
+      // Then durable local capture files and the queue record itself.
+      removePreparedCapture(item.id);
+      await removeQueueItem(item.id);
+    },
+    []
+  );
+
+  const deleteFailed = useCallback(
+    async (itemId: string) => {
+      if (!user) return;
+      const currentItems = await listQueueItems(user.id);
+      const item = currentItems.find((candidate) => candidate.id === itemId && candidate.state === 'failed');
+      if (!item) return;
+      await deleteFailedItem(item);
+      await refresh();
+    },
+    [deleteFailedItem, refresh, user]
+  );
+
+  const deleteAllFailed = useCallback(async (): Promise<BulkDeleteResult> => {
+    if (!user) return { deletedTotal: 0, failedTotal: 0 };
+
+    const currentItems = await listQueueItems(user.id);
+    const failedItems = currentItems.filter((item) => item.state === 'failed');
+    if (failedItems.length === 0) return { deletedTotal: 0, failedTotal: 0 };
+
+    setIsDeletingFailed(true);
+    setBulkSummaryNotice(null);
+    setBulkProgress({ current: 0, total: failedItems.length });
+
+    let deletedTotal = 0;
+    let failedTotal = 0;
+
+    for (let index = 0; index < failedItems.length; index++) {
+      setBulkProgress({ current: index + 1, total: failedItems.length });
+      try {
+        await deleteFailedItem(failedItems[index]);
+        deletedTotal++;
+      } catch {
+        failedTotal++;
+      }
+    }
+
+    setIsDeletingFailed(false);
+    setBulkProgress(null);
+    await refresh();
+
+    setBulkSummaryNotice(
+      failedTotal === 0
+        ? `${deletedTotal} failed ${deletedTotal === 1 ? 'scan' : 'scans'} deleted and cleaned up.`
+        : `${deletedTotal} deleted · ${failedTotal} couldn't be deleted.`
+    );
+
+    return { deletedTotal, failedTotal };
+  }, [deleteFailedItem, refresh, user]);
+
   const dismissSynced = useCallback(async () => {
     const synced = items.filter((item) => item.state === 'synced');
     await Promise.all(
@@ -317,12 +389,15 @@ export function CaptureQueueProvider({ children }: PropsWithChildren) {
       syncedCount,
       isProcessing,
       isRetryingBulk,
+      isDeletingFailed,
       bulkProgress,
       bulkSummaryNotice,
       enqueue,
       refresh,
       retry: retrySingle,
       retryAllFailed,
+      deleteFailed,
+      deleteAllFailed,
       dismissSynced,
       clearSummaryNotice,
     }),
@@ -330,9 +405,12 @@ export function CaptureQueueProvider({ children }: PropsWithChildren) {
       bulkProgress,
       bulkSummaryNotice,
       clearSummaryNotice,
+      deleteAllFailed,
+      deleteFailed,
       dismissSynced,
       enqueue,
       failedCount,
+      isDeletingFailed,
       isProcessing,
       isRetryingBulk,
       items,

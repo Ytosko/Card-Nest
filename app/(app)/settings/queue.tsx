@@ -1,6 +1,7 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Stack } from 'expo-router';
-import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
+import { useState } from 'react';
+import { ActivityIndicator, Modal, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppButton } from '@/src/components/ui/app-button';
@@ -14,14 +15,59 @@ export default function QueueScreen() {
   const theme = useAppTheme();
   const queue = useCaptureQueue();
 
+  const [deleteAllConfirmVisible, setDeleteAllConfirmVisible] = useState(false);
+  const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
+
   const isRetrying = queue.isRetryingBulk;
+  const isDeleting = queue.isDeletingFailed;
+  const isBusy = isRetrying || isDeleting || deletingItemId !== null;
   const progressText = queue.bulkProgress
-    ? `${queue.bulkProgress.current} of ${queue.bulkProgress.total} retrying...`
+    ? `${queue.bulkProgress.current} of ${queue.bulkProgress.total} ${isDeleting ? 'deleting' : 'retrying'}...`
+    : isDeleting
+    ? 'Deleting all failed...'
     : 'Retrying all failed...';
+
+  async function handleDeleteSingle(itemId: string) {
+    setDeletingItemId(itemId);
+    try {
+      await queue.deleteFailed(itemId);
+    } finally {
+      setDeletingItemId(null);
+    }
+  }
+
+  function confirmDeleteAll() {
+    setDeleteAllConfirmVisible(false);
+    void queue.deleteAllFailed();
+  }
 
   return (
     <SafeAreaView edges={['bottom']} style={[styles.safeArea, { backgroundColor: theme.colors.background }]}>
       <Stack.Screen options={{ headerShown: true, title: 'Sync and Queue' }} />
+
+      {/* Delete All Failed Confirmation Dialog */}
+      <Modal animationType="fade" transparent visible={deleteAllConfirmVisible}>
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalBox, { backgroundColor: theme.colors.surface, borderRadius: theme.radii.lg }]}>
+            <MaterialCommunityIcons color={theme.colors.danger} name="trash-can-outline" size={32} />
+            <AppText variant="title" style={{ textAlign: 'center' }}>
+              Delete {queue.failedCount} failed {queue.failedCount === 1 ? 'scan' : 'scans'}?
+            </AppText>
+            <AppText muted variant="caption" style={{ textAlign: 'center' }}>
+              This removes the queued captures, their local photos, and any partial cloud data. Saved contacts are
+              never affected.
+            </AppText>
+            <View style={{ gap: 8, marginTop: 8, width: '100%' }}>
+              <AppButton onPress={confirmDeleteAll} style={{ backgroundColor: theme.colors.danger }}>
+                Delete {queue.failedCount} failed {queue.failedCount === 1 ? 'scan' : 'scans'}
+              </AppButton>
+              <AppButton onPress={() => setDeleteAllConfirmVisible(false)} variant="secondary">
+                Cancel
+              </AppButton>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <ScrollView contentContainerStyle={[styles.content, { gap: theme.spacing[4], padding: theme.spacing[5] }]}>
         {/* Metric Summary Bar */}
@@ -65,10 +111,18 @@ export default function QueueScreen() {
             </View>
 
             <AppButton
-              disabled={isRetrying || queue.failedCount === 0}
+              disabled={isBusy || queue.failedCount === 0}
               loading={isRetrying}
               onPress={() => void queue.retryAllFailed()}>
-              {isRetrying ? progressText : 'Retry all failed'}
+              {isRetrying || isDeleting ? progressText : 'Retry all failed'}
+            </AppButton>
+
+            <AppButton
+              disabled={isBusy || queue.failedCount === 0}
+              loading={isDeleting}
+              onPress={() => setDeleteAllConfirmVisible(true)}
+              variant="secondary">
+              Delete all failed
             </AppButton>
           </View>
         ) : null}
@@ -141,12 +195,23 @@ export default function QueueScreen() {
                 </View>
 
                 {isFailed ? (
-                  <AppButton
-                    disabled={isRetrying}
-                    onPress={() => void queue.retry(item.id)}
-                    variant="secondary">
-                    Retry
-                  </AppButton>
+                  <View style={styles.failedActions}>
+                    <AppButton
+                      disabled={isBusy}
+                      onPress={() => void queue.retry(item.id)}
+                      variant="secondary">
+                      Retry
+                    </AppButton>
+                    <AppButton
+                      disabled={isBusy}
+                      loading={deletingItemId === item.id}
+                      onPress={() => void handleDeleteSingle(item.id)}
+                      style={{ borderColor: theme.colors.danger }}
+                      textColor={theme.colors.danger}
+                      variant="secondary">
+                      Delete
+                    </AppButton>
+                  </View>
                 ) : isUploading ? (
                   <ActivityIndicator color={theme.colors.primary} size="small" />
                 ) : null}
@@ -233,6 +298,21 @@ const styles = StyleSheet.create({
   },
   content: { alignSelf: 'center', maxWidth: 760, width: '100%' },
   copy: { flex: 1 },
+  failedActions: { gap: 6 },
+  modalBackdrop: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    flex: 1,
+    justifyContent: 'center',
+    padding: 24,
+  },
+  modalBox: {
+    alignItems: 'center',
+    gap: 12,
+    maxWidth: 340,
+    padding: 24,
+    width: '100%',
+  },
   item: { alignItems: 'center', borderWidth: 1, flexDirection: 'row', gap: 12 },
   metricsRow: { flexDirection: 'row', gap: 8 },
   safeArea: { flex: 1 },
