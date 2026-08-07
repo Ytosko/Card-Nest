@@ -9,6 +9,9 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
   turbopack: { root: webRoot },
+  // Caps the stale-while-revalidate window on prerendered pages so shared caches
+  // (including crawler caches) refresh public content within the hour.
+  expireTime: 3600,
 };
 
 export default nextConfig;

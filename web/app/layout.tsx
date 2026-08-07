@@ -7,6 +7,11 @@ import './globals.css';
 
 const siteUrl = 'https://cardnest.ytosko.dev';
 
+// Public pages must not be cacheable for a year: Google's verification crawler honors
+// HTTP caching, and a stale year-long copy of the homepage caused repeated reviews of
+// pre-fix content. Five minutes keeps pages fresh for crawlers at negligible cost.
+export const revalidate = 300;
+
 const googleSiteVerification = process.env.GOOGLE_SITE_VERIFICATION?.trim();
 
 export const metadata: Metadata = {
