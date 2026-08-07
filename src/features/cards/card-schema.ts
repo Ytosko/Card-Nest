@@ -11,9 +11,10 @@ export const cardDraftSchema = z
     company: optionalText(240),
     jobTitle: optionalText(240),
     department: optionalText(240),
-    email: z.union([z.literal(''), z.email('Enter a valid email address.')]).default(''),
+    email: z.union([z.literal(''), z.string().email('Enter a valid email address.')]).default(''),
     phone: optionalText(80),
-    website: z.union([z.literal(''), z.url('Enter a complete website address, including https://')]).default(''),
+    fax: optionalText(80),
+    website: z.union([z.literal(''), z.string().url('Enter a complete website address, including https://')]).default(''),
     addressLine1: optionalText(240),
     addressLine2: optionalText(240),
     city: optionalText(120),
@@ -21,6 +22,7 @@ export const cardDraftSchema = z
     postalCode: optionalText(40),
     country: optionalText(120),
     notes: optionalText(4_000),
+    rawText: optionalText(10_000),
   })
   .refine(
     (value) => Boolean(value.displayName || value.firstName || value.lastName || value.company),
@@ -30,9 +32,25 @@ export const cardDraftSchema = z
 export type CardDraft = z.infer<typeof cardDraftSchema>;
 
 export const emptyCardDraft: CardDraft = {
-  firstName: '', middleName: '', lastName: '', displayName: '', company: '', jobTitle: '', department: '',
-  email: '', phone: '', website: '', addressLine1: '', addressLine2: '', city: '', stateRegion: '',
-  postalCode: '', country: '', notes: '',
+  firstName: '',
+  middleName: '',
+  lastName: '',
+  displayName: '',
+  company: '',
+  jobTitle: '',
+  department: '',
+  email: '',
+  phone: '',
+  fax: '',
+  website: '',
+  addressLine1: '',
+  addressLine2: '',
+  city: '',
+  stateRegion: '',
+  postalCode: '',
+  country: '',
+  notes: '',
+  rawText: '',
 };
 
 export function displayNameForDraft(draft: CardDraft) {
