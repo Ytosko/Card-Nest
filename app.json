@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "CardNest",
-    "slug": "CardNest",
+    "slug": "cardnest",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -43,6 +43,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "9f82f370-745c-49b7-8439-d09451a484d8"
+      }
+    },
+    "owner": "ytoskos-team"
   }
 }
