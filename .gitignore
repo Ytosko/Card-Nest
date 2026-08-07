@@ -7,6 +7,8 @@ node_modules/
 .expo/
 dist/
 web-build/
+.next/
+coverage/
 expo-env.d.ts
 
 # Native
@@ -25,13 +27,22 @@ expo-env.d.ts
 npm-debug.*
 yarn-debug.*
 yarn-error.*
+__pycache__/
+*.py[cod]
 
 # macOS
 .DS_Store
 *.pem
 
 # local env files
+.env
+.env.*
+!.env.example
 .env*.local
+
+# Supabase CLI local state
+supabase/.temp/
+supabase/.branches/
 
 # typescript
 *.tsbuildinfo

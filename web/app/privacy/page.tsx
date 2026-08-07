@@ -1,0 +1,18 @@
+import type { Metadata } from 'next';
+
+import { LegalPage } from '@/components/legal-page';
+
+export const metadata: Metadata = { title: 'Privacy Policy', alternates: { canonical: '/privacy' } };
+
+export default function PrivacyPage() {
+  return (
+    <LegalPage eyebrow="YOUR DATA, YOUR CONTROL" intro="This policy explains how Card Nest handles account data, scanned business cards, and service information." title="Privacy Policy">
+      <section><h2>Information we process</h2><p>Card Nest processes account information you provide, business-card images and contact details you choose to store, and limited technical data required to operate and secure the service.</p></section>
+      <section><h2>How information is used</h2><ul><li>Provide authentication, cloud backup, search, and synchronization.</li><li>Process business cards with the AI provider you select.</li><li>Protect the service, diagnose failures, and prevent abuse.</li></ul></section>
+      <section><h2>AI providers and your keys</h2><p>Card Nest is designed for bring-your-own-key AI processing. Provider keys belong to you and are intended to remain in secure device storage rather than the Card Nest database.</p></section>
+      <section><h2>Storage and security</h2><p>Hosted Supabase provides authentication, database, and private image storage. User-owned records are protected with Row Level Security. No system can guarantee absolute security, but access is limited by design.</p></section>
+      <section><h2>Your choices</h2><p>You can edit your profile, remove card records, sign out, and request account assistance. Contact the project through its GitHub repository for privacy questions.</p></section>
+      <section><h2>Changes</h2><p>Material changes will be reflected on this page with an updated effective date.</p></section>
+    </LegalPage>
+  );
+}
