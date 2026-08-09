@@ -9,9 +9,19 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
   turbopack: { root: webRoot },
-  // Caps the stale-while-revalidate window on prerendered pages so shared caches
-  // (including crawler caches) refresh public content within the hour.
   expireTime: 3600,
+  async rewrites() {
+    return [
+      {
+        source: '/.well-known/assetlinks.json',
+        destination: '/api/well-known/assetlinks',
+      },
+      {
+        source: '/.well-known/apple-app-site-association',
+        destination: '/api/well-known/apple-app-site-association',
+      },
+    ];
+  },
 };
 
 export default nextConfig;
