@@ -106,8 +106,8 @@ export default function AuthCallbackPage() {
   }, []);
 
   return (
-    <section className="container grid min-h-[68vh] place-items-center py-16">
-      <div className="card-shadow w-full max-w-xl rounded-[2rem] border border-[#dbe8eb] bg-white p-8 text-center sm:p-12">
+    <section className="container grid min-h-[60vh] place-items-center px-4 py-8 sm:min-h-[68vh] sm:py-16">
+      <div className="card-shadow w-full max-w-xl rounded-[2rem] border border-[#dbe8eb] bg-white p-6 text-center sm:p-10 md:p-12">
         <div
           aria-hidden
           className={`mx-auto grid h-16 w-16 place-items-center rounded-full text-3xl font-black ${
@@ -115,18 +115,18 @@ export default function AuthCallbackPage() {
           }`}>
           {state === 'checking' ? '…' : state === 'error' ? '!' : '✓'}
         </div>
-        <p className="mt-7 text-sm font-bold tracking-[0.12em] text-[#079cb8]">SECURE AUTH CALLBACK</p>
-        <h1 className="mt-3 text-3xl font-bold tracking-[-0.04em]">
+        <p className="mt-6 text-xs font-bold tracking-[0.12em] text-[#079cb8] sm:mt-7 sm:text-sm">SECURE AUTH CALLBACK</p>
+        <h1 className="mt-2 text-2xl font-bold tracking-[-0.04em] sm:mt-3 sm:text-3xl">
           {state === 'error' ? 'This link could not be verified' : state === 'checking' ? 'Verifying your link' : 'You’re verified'}
         </h1>
-        <p aria-live="polite" className="mt-5 leading-7 text-[#60767c]">{message}</p>
-        <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center">
+        <p aria-live="polite" className="mt-4 text-base leading-7 text-[#60767c] sm:mt-5">{message}</p>
+        <div className="mt-7 flex flex-col gap-3 sm:mt-8 sm:flex-row sm:justify-center">
           {state === 'success' ? (
-            <a className="focus-ring inline-flex min-h-12 items-center justify-center rounded-xl bg-[#079cb8] px-6 font-bold text-white hover:bg-[#067a90]" href={appLink}>
+            <a className="focus-ring inline-flex min-h-12 items-center justify-center rounded-xl bg-[#079cb8] px-6 font-bold text-white transition hover:bg-[#067a90] active:scale-98" href={appLink}>
               Open Card Nest
             </a>
           ) : null}
-          <Link className="focus-ring inline-flex min-h-12 items-center justify-center rounded-xl border border-[#bfd5da] px-6 font-bold text-[#334a50] hover:border-[#0CC0DF]" href="/">
+          <Link className="focus-ring inline-flex min-h-12 items-center justify-center rounded-xl border border-[#bfd5da] px-6 font-bold text-[#334a50] transition hover:border-[#0CC0DF] hover:text-[#067a90]" href="/">
             Return home
           </Link>
         </div>
