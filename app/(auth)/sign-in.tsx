@@ -12,7 +12,9 @@ import { AuthLink } from '@/src/features/auth/components/auth-link';
 import { AuthNotice } from '@/src/features/auth/components/auth-notice';
 import { AuthShell } from '@/src/features/auth/components/auth-shell';
 import { GOOGLE_SIGN_IN_ENABLED } from '@/src/features/auth/auth-flags';
+import { PasskeyAuthButton } from '@/src/features/auth/components/passkey-auth-button';
 import { AuthMethodDivider, GoogleAuthButton } from '@/src/features/auth/components/google-auth-button';
+import { signInWithPasskey } from '@/src/features/auth/passkey-service';
 import { supabase } from '@/src/lib/supabase/client';
 import { useAppTheme } from '@/src/theme/theme-provider';
 
@@ -28,6 +30,7 @@ export default function SignInScreen() {
   const [formError, setFormError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [passkeyLoading, setPasskeyLoading] = useState(false);
 
   if (initialized && session) return <Redirect href="/(app)/home" />;
 
@@ -76,6 +79,23 @@ export default function SignInScreen() {
       );
     } finally {
       setGoogleLoading(false);
+    }
+  }
+
+  async function submitPasskey() {
+    setFormError(null);
+    setPasskeyLoading(true);
+    try {
+      const result = await signInWithPasskey();
+      if (result.success) {
+        router.replace('/(app)/home');
+      } else {
+        setFormError(result.error);
+      }
+    } catch {
+      setFormError('Passkey sign-in failed. Please try signing in with Google or Email.');
+    } finally {
+      setPasskeyLoading(false);
     }
   }
 
@@ -129,14 +149,21 @@ export default function SignInScreen() {
           <View style={styles.forgotRow}>
             <AuthLink href="/(auth)/forgot-password">Forgot password?</AuthLink>
           </View>
-          <AppButton disabled={googleLoading} loading={loading} onPress={() => void submit()}>
+          <AppButton disabled={googleLoading || passkeyLoading} loading={loading} onPress={() => void submit()}>
             Sign in
           </AppButton>
+          <AuthMethodDivider />
+          <PasskeyAuthButton
+            disabled={loading || googleLoading}
+            loading={passkeyLoading}
+            onPress={() => void submitPasskey()}
+          />
           {GOOGLE_SIGN_IN_ENABLED ? (
-            <>
-              <AuthMethodDivider />
-              <GoogleAuthButton disabled={loading} loading={googleLoading} onPress={() => void submitGoogle()} />
-            </>
+            <GoogleAuthButton
+              disabled={loading || passkeyLoading}
+              loading={googleLoading}
+              onPress={() => void submitGoogle()}
+            />
           ) : null}
         </View>
       </AuthShell>

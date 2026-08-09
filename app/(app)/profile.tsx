@@ -220,7 +220,13 @@ export default function ProfileScreen() {
           </View>
 
           <View style={[styles.card, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, borderRadius: theme.radii.lg, gap: theme.spacing[3], padding: theme.spacing[5] }]}>
-            <AppText variant="title">Account</AppText>
+            <AppText variant="title">Account & Security</AppText>
+            <AppButton disabled={busy} onPress={() => router.push('/(app)/settings/security')} variant="secondary">
+              Security & Passkeys
+            </AppButton>
+            <AppButton disabled={busy} onPress={() => router.push('/(app)/settings/about')} variant="secondary">
+              About & App Updates
+            </AppButton>
             <AppButton disabled={busy} onPress={() => void handleSignOut()} variant="secondary">Sign out</AppButton>
             <AppButton disabled={busy} onPress={confirmDelete} variant="secondary">Delete account</AppButton>
           </View>
