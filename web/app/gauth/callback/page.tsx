@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 type CallbackState = 'connecting' | 'success' | 'error';
 
@@ -45,16 +45,27 @@ export default function GoogleAuthCallbackPage() {
   const [state, setState] = useState<CallbackState>('connecting');
   const [errorKind, setErrorKind] = useState<ErrorKind>('failed');
   const [appLink, setAppLink] = useState('cardnest://');
+  const hasProcessed = useRef(false);
 
   useEffect(() => {
+    if (hasProcessed.current) return;
+    hasProcessed.current = true;
+
     let openTimer: number | undefined;
 
-    async function completeSignIn() {
+    async function processCallback() {
+      // 1. Extract params BEFORE clearing browser location history
       const search = new URLSearchParams(window.location.search);
       const hash = new URLSearchParams(window.location.hash.replace(/^#/u, ''));
-      // Session material and provider parameters must never stay in the visible URL
-      // or browser history.
-      window.history.replaceState({}, '', '/gauth/callback');
+
+      // 2. Clear sensitive tokens from browser URL bar
+      if (window.location.search || window.location.hash) {
+        try {
+          window.history.replaceState({}, '', '/gauth/callback');
+        } catch {
+          // Ignore replaceState failures in constrained webviews
+        }
+      }
 
       const suppliedError = search.get('error') ?? hash.get('error');
       const suppliedErrorCode = search.get('error_code') ?? hash.get('error_code');
@@ -94,10 +105,14 @@ export default function GoogleAuthCallbackPage() {
       const appLinkToOpen = nextAppLink;
       setAppLink(appLinkToOpen);
       setState('success');
-      openTimer = window.setTimeout(() => window.location.assign(appLinkToOpen), 650);
+
+      // Automatically trigger app launch via deep link
+      openTimer = window.setTimeout(() => {
+        window.location.assign(appLinkToOpen);
+      }, 300);
     }
 
-    void completeSignIn();
+    void processCallback();
 
     return () => {
       if (openTimer) window.clearTimeout(openTimer);
