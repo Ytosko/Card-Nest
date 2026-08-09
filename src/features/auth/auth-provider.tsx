@@ -180,6 +180,15 @@ export function AuthProvider({ children }: PropsWithChildren) {
     }
     if (!data?.url) throw new Error('Google sign-in could not be started. Please try again.');
 
+    const redirectHost = data.url ? new URL(data.url).host : 'none';
+    console.log('[CardNest Mobile Auth] OAuth URL generated:', {
+      hasUrl: Boolean(data.url),
+      redirectHost,
+      provider: 'google',
+      redirectTo,
+      skipBrowserRedirect: true,
+    });
+
     console.log('[CardNest Mobile Auth] Opening WebBrowser auth session...');
     const result = await WebBrowser.openAuthSessionAsync(data.url, returnUrl);
     console.log('[CardNest Mobile Auth] WebBrowser auth session result type:', result.type);

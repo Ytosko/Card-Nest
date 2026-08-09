@@ -77,6 +77,7 @@ export function GoogleAuthCallbackClient({ correlationId }: { correlationId: str
       const suppliedError = search.get('error') ?? hash.get('error');
       const suppliedErrorCode = search.get('error_code') ?? hash.get('error_code');
       const suppliedDescription = search.get('error_description') ?? hash.get('error_description');
+      const suppliedUri = search.get('error_uri') ?? hash.get('error_uri');
 
       const accessToken = hash.get('access_token') ?? search.get('access_token');
       const refreshToken = hash.get('refresh_token') ?? search.get('refresh_token');
@@ -86,7 +87,11 @@ export function GoogleAuthCallbackClient({ correlationId }: { correlationId: str
         codePresent: Boolean(code),
         hashTokensPresent: Boolean(accessToken && refreshToken),
         searchTokensPresent: Boolean(search.get('access_token') && search.get('refresh_token')),
-        errorPresent: Boolean(suppliedError || suppliedErrorCode),
+        errorPresent: Boolean(suppliedError || suppliedErrorCode || suppliedDescription),
+        error: suppliedError,
+        errorCode: suppliedErrorCode,
+        errorDescription: suppliedDescription,
+        errorUri: suppliedUri,
       });
 
       // 2. Clear sensitive tokens from browser URL bar for security
@@ -101,9 +106,16 @@ export function GoogleAuthCallbackClient({ correlationId }: { correlationId: str
       await Promise.resolve();
 
       // 3. Handle OAuth Provider Error
-      if (suppliedError || suppliedErrorCode) {
+      if (suppliedError || suppliedErrorCode || suppliedDescription) {
         const kind = classifyError(suppliedError, suppliedErrorCode, suppliedDescription);
-        sendDiagnostic(correlationId, 'callback_error', { errorKind: kind, errorPresent: true });
+        sendDiagnostic(correlationId, 'callback_error', {
+          errorKind: kind,
+          errorPresent: true,
+          error: suppliedError,
+          errorCode: suppliedErrorCode,
+          errorDescription: suppliedDescription,
+          errorUri: suppliedUri,
+        });
         setErrorKind(kind);
         setState('error');
         return;
@@ -191,6 +203,11 @@ export function GoogleAuthCallbackClient({ correlationId }: { correlationId: str
               ? 'One moment while we secure your Card Nest session…'
               : 'Return to the Card Nest app to continue. If the app didn’t open automatically, tap Open Card Nest below.'}
         </p>
+        {isError ? (
+          <p className="mt-3 text-xs font-mono text-[#8aa0a6]">
+            Reference: {correlationId}
+          </p>
+        ) : null}
         <div className="mt-7 flex flex-col gap-3 sm:mt-8 sm:flex-row sm:justify-center">
           {state === 'success' ? (
             <a
