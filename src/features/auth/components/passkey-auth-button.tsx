@@ -2,6 +2,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { StyleSheet } from 'react-native';
 
 import { AppButton } from '@/src/components/ui/app-button';
+import { getPasskeyAvailability } from '@/src/features/auth/passkey-service';
 import { useAppTheme } from '@/src/theme/theme-provider';
 
 export function PasskeyAuthButton({
@@ -14,6 +15,12 @@ export function PasskeyAuthButton({
   onPress: () => void;
 }) {
   const theme = useAppTheme();
+  const availability = getPasskeyAvailability();
+
+  if (!availability.isSupported) {
+    return null;
+  }
+
   return (
     <AppButton
       disabled={disabled}
@@ -32,3 +39,4 @@ const styles = StyleSheet.create({
     minHeight: 48,
   },
 });
+

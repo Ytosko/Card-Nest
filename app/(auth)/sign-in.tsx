@@ -90,10 +90,13 @@ export default function SignInScreen() {
       if (result.success) {
         router.replace('/(app)/home');
       } else {
+        if (result.isCancelled) {
+          return;
+        }
         setFormError(result.error);
       }
-    } catch {
-      setFormError('Passkey sign-in failed. Please try signing in with Google or Email.');
+    } catch (err: any) {
+      setFormError(err?.message || 'Passkey sign-in failed. Please try signing in with Google or Email.');
     } finally {
       setPasskeyLoading(false);
     }

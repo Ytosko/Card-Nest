@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 
 import { useAuth } from '@/src/features/auth/auth-provider';
 import { AuthLoadingScreen } from '@/src/features/auth/components/auth-loading-screen';
-import { listUserPasskeys } from '@/src/features/auth/passkey-service';
+import { getPasskeyAvailability, listUserPasskeys } from '@/src/features/auth/passkey-service';
 import { authStorage } from '@/src/lib/supabase/auth-storage';
 
 export default function SignedInLayout() {
@@ -22,8 +22,10 @@ export default function SignedInLayout() {
       }
 
       try {
+        const availability = getPasskeyAvailability();
         const prompted = await authStorage.getItem('passkey_setup_prompted');
-        if (prompted === 'true') {
+
+        if (prompted === 'true' || !availability.isSupported) {
           if (isMounted) setCheckingPasskey(false);
           return;
         }
@@ -33,7 +35,8 @@ export default function SignedInLayout() {
           if (isMounted && pathname !== '/passkey-setup') {
             router.replace('/(app)/passkey-setup');
           }
-        } else if (res.success && res.data.length > 0) {
+        } else {
+          // Account already has registered passkey(s) or list check completed
           await authStorage.setItem('passkey_setup_prompted', 'true');
         }
       } catch {

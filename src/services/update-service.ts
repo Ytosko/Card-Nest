@@ -25,8 +25,8 @@ export interface UpdateCheckResult {
 const GITHUB_RELEASES_API = 'https://api.github.com/repos/Ytosko/Card-Nest/releases/latest';
 
 export function getCurrentVersionInfo(): VersionInfo {
-  const configVersion = Constants.expoConfig?.version || '0.1.1-alpha-f9801';
-  const configVersionCode = Constants.expoConfig?.android?.versionCode || 2;
+  const configVersion = Constants.expoConfig?.version || '0.1.3-alpha-c9085';
+  const configVersionCode = Constants.expoConfig?.android?.versionCode || 5;
   return {
     versionName: configVersion,
     versionCode: configVersionCode,
