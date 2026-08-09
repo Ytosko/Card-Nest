@@ -4,4 +4,4 @@
  * verification completes. Flip to true to re-enable the buttons — no other
  * changes are required.
  */
-export const GOOGLE_SIGN_IN_ENABLED = false;
+export const GOOGLE_SIGN_IN_ENABLED = true;
