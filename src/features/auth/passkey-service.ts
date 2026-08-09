@@ -1,5 +1,4 @@
 import { Platform } from 'react-native';
-import * as PasskeyNative from 'react-native-passkeys';
 
 import { supabase } from '@/src/lib/supabase/client';
 
@@ -12,7 +11,39 @@ export interface UserPasskey {
 
 export type PasskeyResult<T> =
   | { success: true; data: T }
-  | { success: false; error: string; code?: string };
+  | { success: false; error: string; code?: string; isCancelled?: boolean };
+
+let overrideNativeModule: any = null;
+
+export function setNativePasskeysModule(mod: any) {
+  overrideNativeModule = mod;
+}
+
+function getNativePasskeysModule(): any | null {
+  if (overrideNativeModule) return overrideNativeModule;
+  if (Platform.OS === 'web') return null;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const mod = require('react-native-passkeys');
+    if (mod && (typeof mod.isSupported === 'function' || typeof mod.create === 'function' || typeof mod.default?.isSupported === 'function')) {
+      return mod.default || mod;
+    }
+  } catch {
+    // Native module not present in current binary (e.g. Expo Go)
+  }
+  return null;
+}
+
+function isUserCancellation(err: any): boolean {
+  const message = (err?.message || err?.name || String(err || '')).toLowerCase();
+  return (
+    message.includes('cancel') ||
+    message.includes('abort') ||
+    message.includes('notallowederror') ||
+    message.includes('user_cancel') ||
+    message.includes('dismiss')
+  );
+}
 
 export function isPasskeySupported(): boolean {
   if (Platform.OS === 'web') {
@@ -22,8 +53,12 @@ export function isPasskeySupported(): boolean {
       Boolean(window.navigator?.credentials?.create)
     );
   }
+
+  const nativeMod = getNativePasskeysModule();
+  if (!nativeMod) return false;
+
   try {
-    return PasskeyNative.isSupported();
+    return Boolean(nativeMod.isSupported());
   } catch {
     return false;
   }
@@ -50,6 +85,9 @@ export async function listUserPasskeys(): Promise<PasskeyResult<UserPasskey[]>> 
 export async function registerPasskey(friendlyName?: string): Promise<PasskeyResult<UserPasskey>> {
   try {
     if (Platform.OS === 'web') {
+      if (!isPasskeySupported()) {
+        return { success: false, error: 'Passkeys are not supported on this browser.' };
+      }
       const { data, error } = await supabase.auth.registerPasskey();
       if (error) {
         return { success: false, error: "Passkey couldn't be created. You can try again or set it up later from Security settings." };
@@ -64,6 +102,11 @@ export async function registerPasskey(friendlyName?: string): Promise<PasskeyRes
       };
     }
 
+    const nativeMod = getNativePasskeysModule();
+    if (!nativeMod || !isPasskeySupported()) {
+      return { success: false, error: 'Passkeys require the Card Nest app version that supports passkeys.' };
+    }
+
     // Native Mobile Registration (Android Credential Manager / iOS ASAuthorizationController)
     const { data: startData, error: startError } = await supabase.auth.passkey.startRegistration();
     if (startError || !startData) {
@@ -73,16 +116,23 @@ export async function registerPasskey(friendlyName?: string): Promise<PasskeyRes
     const challengeId = (startData as any).challengeId || (startData as any).id || '';
     const creationOptions = (startData as any).publicKey || startData;
 
-    // Pass creation options to native authenticator
-    const credential = await PasskeyNative.create(creationOptions as any);
-    if (!credential) {
-      return { success: false, error: 'Passkey registration was cancelled.' };
+    let credential: any = null;
+    try {
+      credential = await nativeMod.create(creationOptions);
+    } catch (createErr: any) {
+      if (isUserCancellation(createErr)) {
+        return { success: false, error: 'Passkey registration was cancelled.', isCancelled: true };
+      }
+      return { success: false, error: "Passkey couldn't be created. You can try again or set it up later from Security settings." };
     }
 
-    // Verify registration response with Supabase Auth
+    if (!credential) {
+      return { success: false, error: 'Passkey registration was cancelled.', isCancelled: true };
+    }
+
     const { data: verifyData, error: verifyError } = await supabase.auth.passkey.verifyRegistration({
       challengeId,
-      credential: credential as any,
+      credential,
     });
     if (verifyError) {
       return { success: false, error: 'Passkey verification failed. Please try again.' };
@@ -97,9 +147,8 @@ export async function registerPasskey(friendlyName?: string): Promise<PasskeyRes
       },
     };
   } catch (err: any) {
-    const message = err?.message || '';
-    if (message.toLowerCase().includes('cancel') || message.toLowerCase().includes('abort')) {
-      return { success: false, error: 'Passkey registration was cancelled.' };
+    if (isUserCancellation(err)) {
+      return { success: false, error: 'Passkey registration was cancelled.', isCancelled: true };
     }
     return { success: false, error: "Passkey couldn't be created. You can try again or set it up later from Security settings." };
   }
@@ -108,11 +157,19 @@ export async function registerPasskey(friendlyName?: string): Promise<PasskeyRes
 export async function signInWithPasskey(): Promise<PasskeyResult<void>> {
   try {
     if (Platform.OS === 'web') {
+      if (!isPasskeySupported()) {
+        return { success: false, error: 'Passkeys are not supported on this browser.' };
+      }
       const { error } = await supabase.auth.signInWithPasskey();
       if (error) {
         return { success: false, error: error.message || 'Passkey sign-in failed.' };
       }
       return { success: true, data: undefined };
+    }
+
+    const nativeMod = getNativePasskeysModule();
+    if (!nativeMod || !isPasskeySupported()) {
+      return { success: false, error: 'Passkeys require the Card Nest app version that supports passkeys.' };
     }
 
     // Native Mobile Authentication (Android Credential Manager / iOS ASAuthorizationController)
@@ -124,14 +181,23 @@ export async function signInWithPasskey(): Promise<PasskeyResult<void>> {
     const challengeId = (startData as any).challengeId || (startData as any).id || '';
     const requestOptions = (startData as any).publicKey || startData;
 
-    const assertion = await PasskeyNative.get(requestOptions as any);
+    let assertion: any = null;
+    try {
+      assertion = await nativeMod.get(requestOptions);
+    } catch (getErr: any) {
+      if (isUserCancellation(getErr)) {
+        return { success: false, error: 'Passkey sign-in was cancelled.', isCancelled: true };
+      }
+      return { success: false, error: 'Passkey sign-in failed. Please try signing in with Google or Email.' };
+    }
+
     if (!assertion) {
-      return { success: false, error: 'Passkey sign-in was cancelled.' };
+      return { success: false, error: 'Passkey sign-in was cancelled.', isCancelled: true };
     }
 
     const { error: verifyError } = await supabase.auth.passkey.verifyAuthentication({
       challengeId,
-      credential: assertion as any,
+      credential: assertion,
     });
     if (verifyError) {
       return { success: false, error: verifyError.message || 'Passkey authentication failed.' };
@@ -139,9 +205,8 @@ export async function signInWithPasskey(): Promise<PasskeyResult<void>> {
 
     return { success: true, data: undefined };
   } catch (err: any) {
-    const message = err?.message || '';
-    if (message.toLowerCase().includes('cancel') || message.toLowerCase().includes('abort')) {
-      return { success: false, error: 'Passkey sign-in was cancelled.' };
+    if (isUserCancellation(err)) {
+      return { success: false, error: 'Passkey sign-in was cancelled.', isCancelled: true };
     }
     return { success: false, error: 'Passkey sign-in failed. Please try signing in with Google or Email.' };
   }

@@ -7,14 +7,9 @@ import {
   listUserPasskeys,
   registerPasskey,
   renamePasskey,
+  setNativePasskeysModule,
   signInWithPasskey,
 } from './passkey-service';
-
-vi.mock('react-native-passkeys', () => ({
-  isSupported: vi.fn(() => true),
-  create: vi.fn(() => Promise.resolve({ id: 'mock-cred-id', rawId: 'mock-raw-id' })),
-  get: vi.fn(() => Promise.resolve({ id: 'mock-cred-id', rawId: 'mock-raw-id' })),
-}));
 
 vi.mock('@/src/lib/supabase/client', () => ({
   supabase: {
@@ -35,8 +30,19 @@ vi.mock('@/src/lib/supabase/client', () => ({
 }));
 
 describe('Passkey Service', () => {
-  it('detects passkey support correctly', () => {
+  it('gracefully reports unsupported when native module is missing (Expo Go)', () => {
     Platform.OS = 'android';
+    setNativePasskeysModule(null);
+    expect(isPasskeySupported()).toBe(false);
+  });
+
+  it('detects passkey support when native module is present', () => {
+    Platform.OS = 'android';
+    setNativePasskeysModule({
+      isSupported: () => true,
+      create: vi.fn(() => Promise.resolve({ id: 'mock-cred' })),
+      get: vi.fn(() => Promise.resolve({ id: 'mock-cred' })),
+    });
     expect(isPasskeySupported()).toBe(true);
   });
 
@@ -49,8 +55,13 @@ describe('Passkey Service', () => {
     }
   });
 
-  it('registers passkey on native platform', async () => {
+  it('registers passkey on native platform when supported', async () => {
     Platform.OS = 'android';
+    setNativePasskeysModule({
+      isSupported: () => true,
+      create: vi.fn(() => Promise.resolve({ id: 'mock-cred' })),
+      get: vi.fn(() => Promise.resolve({ id: 'mock-cred' })),
+    });
     const res = await registerPasskey('My Fingerprint');
     expect(res.success).toBe(true);
     if (res.success) {
@@ -58,10 +69,30 @@ describe('Passkey Service', () => {
     }
   });
 
-  it('signs in with passkey on native platform', async () => {
+  it('signs in with passkey on native platform when supported', async () => {
     Platform.OS = 'android';
+    setNativePasskeysModule({
+      isSupported: () => true,
+      create: vi.fn(() => Promise.resolve({ id: 'mock-cred' })),
+      get: vi.fn(() => Promise.resolve({ id: 'mock-cred' })),
+    });
     const res = await signInWithPasskey();
     expect(res.success).toBe(true);
+  });
+
+  it('handles user cancellation gracefully', async () => {
+    Platform.OS = 'android';
+    setNativePasskeysModule({
+      isSupported: () => true,
+      create: vi.fn(() => Promise.reject(new Error('User cancelled the operation.'))),
+      get: vi.fn(() => Promise.reject(new Error('User cancelled the operation.'))),
+    });
+    const res = await registerPasskey('My Fingerprint');
+    expect(res.success).toBe(false);
+    if (!res.success) {
+      expect(res.isCancelled).toBe(true);
+      expect(res.error).toBe('Passkey registration was cancelled.');
+    }
   });
 
   it('renames a passkey', async () => {
