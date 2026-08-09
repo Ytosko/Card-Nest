@@ -168,29 +168,49 @@ export function AuthProvider({ children }: PropsWithChildren) {
     const redirectTo = `${callbackOrigin}/gauth/callback`;
     const returnUrl = `${env.EXPO_PUBLIC_APP_SCHEME}://auth/callback`;
 
+    console.log('[CardNest Mobile Auth] Initiating Google OAuth:', { redirectTo, returnUrl });
+
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: { redirectTo, skipBrowserRedirect: true },
     });
-    if (error) throw error;
+    if (error) {
+      console.error('[CardNest Mobile Auth] Supabase OAuth initiation error:', error);
+      throw error;
+    }
     if (!data?.url) throw new Error('Google sign-in could not be started. Please try again.');
 
+    console.log('[CardNest Mobile Auth] Opening WebBrowser auth session...');
     const result = await WebBrowser.openAuthSessionAsync(data.url, returnUrl);
+    console.log('[CardNest Mobile Auth] WebBrowser auth session result type:', result.type);
     if (result.type !== 'success' || !result.url) return 'cancelled';
 
+    console.log('[CardNest Mobile Auth] Parsing return deep-link URL...');
     const parsed = parseAuthLink(result.url);
+    console.log('[CardNest Mobile Auth] Parsed auth link kind:', parsed.kind);
+
     if (parsed.kind === 'error') throw new Error(parsed.message);
     if (parsed.kind === 'session') {
+      console.log('[CardNest Mobile Auth] Setting session from hash tokens...');
       const { error: sessionError } = await supabase.auth.setSession({
         access_token: parsed.accessToken,
         refresh_token: parsed.refreshToken,
       });
-      if (sessionError) throw sessionError;
+      if (sessionError) {
+        console.error('[CardNest Mobile Auth] setSession error:', sessionError);
+        throw sessionError;
+      }
+      console.log('[CardNest Mobile Auth] Session established successfully from hash tokens!');
       return 'success';
     }
     if (parsed.kind === 'code') {
+      console.log('[CardNest Mobile Auth] Exchanging PKCE code for session...');
       const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(parsed.code);
-      if (exchangeError) throw exchangeError;
+      if (exchangeError) {
+        console.error('[CardNest Mobile Auth] PKCE exchange error:', exchangeError);
+        throw exchangeError;
+      }
+      console.log('[CardNest Mobile Auth] PKCE code exchange succeeded!');
       return 'success';
     }
     throw new Error('Google sign-in did not return a valid Card Nest session. Please try again.');
