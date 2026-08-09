@@ -28,7 +28,43 @@ export interface PasskeyAvailability {
 
 export type PasskeyResult<T> =
   | { success: true; data: T }
+<<<<<<< HEAD
   | { success: false; error: string; code?: PasskeyErrorCode; isCancelled?: boolean };
+=======
+  | { success: false; error: string; code?: string; isCancelled?: boolean };
+
+let overrideNativeModule: any = null;
+
+export function setNativePasskeysModule(mod: any) {
+  overrideNativeModule = mod;
+}
+
+function getNativePasskeysModule(): any | null {
+  if (overrideNativeModule) return overrideNativeModule;
+  if (Platform.OS === 'web') return null;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const mod = require('react-native-passkeys');
+    if (mod && (typeof mod.isSupported === 'function' || typeof mod.create === 'function' || typeof mod.default?.isSupported === 'function')) {
+      return mod.default || mod;
+    }
+  } catch {
+    // Native module not present in current binary (e.g. Expo Go)
+  }
+  return null;
+}
+
+function isUserCancellation(err: any): boolean {
+  const message = (err?.message || err?.name || String(err || '')).toLowerCase();
+  return (
+    message.includes('cancel') ||
+    message.includes('abort') ||
+    message.includes('notallowederror') ||
+    message.includes('user_cancel') ||
+    message.includes('dismiss')
+  );
+}
+>>>>>>> 5e7a263056d44fb2e9db9b2b11f445ef343b02db
 
 let overrideNativeModule: any = null;
 
@@ -69,6 +105,7 @@ export function getPasskeyAvailability(): PasskeyAvailability {
     return { isSupported: true };
   }
 
+<<<<<<< HEAD
   if (isExpoGoEnvironment()) {
     return { isSupported: false, code: 'PASSKEY_EXPO_GO', reason: 'Passkeys require a standalone build or development client.' };
   }
@@ -86,6 +123,15 @@ export function getPasskeyAvailability(): PasskeyAvailability {
     return { isSupported: true };
   } catch (err: any) {
     return { isSupported: false, code: 'PASSKEY_UNSUPPORTED', reason: err?.message || 'Passkey support check failed.' };
+=======
+  const nativeMod = getNativePasskeysModule();
+  if (!nativeMod) return false;
+
+  try {
+    return Boolean(nativeMod.isSupported());
+  } catch {
+    return false;
+>>>>>>> 5e7a263056d44fb2e9db9b2b11f445ef343b02db
   }
 }
 
@@ -159,6 +205,9 @@ export async function registerPasskey(friendlyName?: string): Promise<PasskeyRes
 
   try {
     if (Platform.OS === 'web') {
+      if (!isPasskeySupported()) {
+        return { success: false, error: 'Passkeys are not supported on this browser.' };
+      }
       const { data, error } = await supabase.auth.registerPasskey();
       if (error) {
         return { success: false, error: "Passkey couldn't be created. You can try again or set it up later from Security settings.", code: 'PASSKEY_AUTH_FAILED' };
@@ -176,8 +225,13 @@ export async function registerPasskey(friendlyName?: string): Promise<PasskeyRes
     }
 
     const nativeMod = getNativePasskeysModule();
+<<<<<<< HEAD
     if (!nativeMod) {
       return { success: false, error: 'Passkeys require the Card Nest app version that supports passkeys.', code: 'PASSKEY_NATIVE_MODULE_MISSING' };
+=======
+    if (!nativeMod || !isPasskeySupported()) {
+      return { success: false, error: 'Passkeys require the Card Nest app version that supports passkeys.' };
+>>>>>>> 5e7a263056d44fb2e9db9b2b11f445ef343b02db
     }
 
     // Native Mobile Registration (Android Credential Manager / iOS ASAuthorizationController)
@@ -194,6 +248,7 @@ export async function registerPasskey(friendlyName?: string): Promise<PasskeyRes
       credential = await nativeMod.create(creationOptions);
     } catch (createErr: any) {
       if (isUserCancellation(createErr)) {
+<<<<<<< HEAD
         return { success: false, error: 'Passkey registration was cancelled.', code: 'PASSKEY_CANCELLED', isCancelled: true };
       }
       return { success: false, error: "Passkey couldn't be created. You can try again or set it up later from Security settings.", code: 'PASSKEY_AUTH_FAILED' };
@@ -201,6 +256,15 @@ export async function registerPasskey(friendlyName?: string): Promise<PasskeyRes
 
     if (!credential) {
       return { success: false, error: 'Passkey registration was cancelled.', code: 'PASSKEY_CANCELLED', isCancelled: true };
+=======
+        return { success: false, error: 'Passkey registration was cancelled.', isCancelled: true };
+      }
+      return { success: false, error: "Passkey couldn't be created. You can try again or set it up later from Security settings." };
+    }
+
+    if (!credential) {
+      return { success: false, error: 'Passkey registration was cancelled.', isCancelled: true };
+>>>>>>> 5e7a263056d44fb2e9db9b2b11f445ef343b02db
     }
 
     const { data: verifyData, error: verifyError } = await supabase.auth.passkey.verifyRegistration({
@@ -224,7 +288,11 @@ export async function registerPasskey(friendlyName?: string): Promise<PasskeyRes
     };
   } catch (err: any) {
     if (isUserCancellation(err)) {
+<<<<<<< HEAD
       return { success: false, error: 'Passkey registration was cancelled.', code: 'PASSKEY_CANCELLED', isCancelled: true };
+=======
+      return { success: false, error: 'Passkey registration was cancelled.', isCancelled: true };
+>>>>>>> 5e7a263056d44fb2e9db9b2b11f445ef343b02db
     }
     return { success: false, error: "Passkey couldn't be created. You can try again or set it up later from Security settings.", code: 'PASSKEY_AUTH_FAILED' };
   }
@@ -242,6 +310,9 @@ export async function signInWithPasskey(): Promise<PasskeyResult<void>> {
 
   try {
     if (Platform.OS === 'web') {
+      if (!isPasskeySupported()) {
+        return { success: false, error: 'Passkeys are not supported on this browser.' };
+      }
       const { error } = await supabase.auth.signInWithPasskey();
       if (error) {
         if (isNoCredentialsError(error)) {
@@ -257,8 +328,13 @@ export async function signInWithPasskey(): Promise<PasskeyResult<void>> {
     }
 
     const nativeMod = getNativePasskeysModule();
+<<<<<<< HEAD
     if (!nativeMod) {
       return { success: false, error: 'Passkeys require the Card Nest app version that supports passkeys.', code: 'PASSKEY_NATIVE_MODULE_MISSING' };
+=======
+    if (!nativeMod || !isPasskeySupported()) {
+      return { success: false, error: 'Passkeys require the Card Nest app version that supports passkeys.' };
+>>>>>>> 5e7a263056d44fb2e9db9b2b11f445ef343b02db
     }
 
     // Native Mobile Authentication (Android Credential Manager / iOS ASAuthorizationController)
@@ -275,6 +351,7 @@ export async function signInWithPasskey(): Promise<PasskeyResult<void>> {
       assertion = await nativeMod.get(requestOptions);
     } catch (getErr: any) {
       if (isUserCancellation(getErr)) {
+<<<<<<< HEAD
         return { success: false, error: 'Passkey sign-in was cancelled.', code: 'PASSKEY_CANCELLED', isCancelled: true };
       }
       if (isNoCredentialsError(getErr)) {
@@ -293,6 +370,15 @@ export async function signInWithPasskey(): Promise<PasskeyResult<void>> {
 
     if (!assertion) {
       return { success: false, error: 'Passkey sign-in was cancelled.', code: 'PASSKEY_CANCELLED', isCancelled: true };
+=======
+        return { success: false, error: 'Passkey sign-in was cancelled.', isCancelled: true };
+      }
+      return { success: false, error: 'Passkey sign-in failed. Please try signing in with Google or Email.' };
+    }
+
+    if (!assertion) {
+      return { success: false, error: 'Passkey sign-in was cancelled.', isCancelled: true };
+>>>>>>> 5e7a263056d44fb2e9db9b2b11f445ef343b02db
     }
 
     const { error: verifyError } = await supabase.auth.passkey.verifyAuthentication({
@@ -306,7 +392,11 @@ export async function signInWithPasskey(): Promise<PasskeyResult<void>> {
     return { success: true, data: undefined };
   } catch (err: any) {
     if (isUserCancellation(err)) {
+<<<<<<< HEAD
       return { success: false, error: 'Passkey sign-in was cancelled.', code: 'PASSKEY_CANCELLED', isCancelled: true };
+=======
+      return { success: false, error: 'Passkey sign-in was cancelled.', isCancelled: true };
+>>>>>>> 5e7a263056d44fb2e9db9b2b11f445ef343b02db
     }
     if (isNoCredentialsError(err)) {
       return {
