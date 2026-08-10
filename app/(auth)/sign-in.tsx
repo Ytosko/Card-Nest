@@ -11,7 +11,7 @@ import { getFieldErrors, normalizeEmail, signInSchema, type FieldErrors, validat
 import { AuthLink } from '@/src/features/auth/components/auth-link';
 import { AuthNotice } from '@/src/features/auth/components/auth-notice';
 import { AuthShell } from '@/src/features/auth/components/auth-shell';
-import { GOOGLE_SIGN_IN_ENABLED } from '@/src/features/auth/auth-flags';
+import { GOOGLE_SIGN_IN_ENABLED, PASSKEY_ENABLED } from '@/src/features/auth/auth-flags';
 import { PasskeyAuthButton } from '@/src/features/auth/components/passkey-auth-button';
 import { AuthMethodDivider, GoogleAuthButton } from '@/src/features/auth/components/google-auth-button';
 import { signInWithPasskey } from '@/src/features/auth/passkey-service';
@@ -155,12 +155,16 @@ export default function SignInScreen() {
           <AppButton disabled={googleLoading || passkeyLoading} loading={loading} onPress={() => void submit()}>
             Sign in
           </AppButton>
-          <AuthMethodDivider />
-          <PasskeyAuthButton
-            disabled={loading || googleLoading}
-            loading={passkeyLoading}
-            onPress={() => void submitPasskey()}
-          />
+          {PASSKEY_ENABLED ? (
+            <>
+              <AuthMethodDivider />
+              <PasskeyAuthButton
+                disabled={loading || googleLoading}
+                loading={passkeyLoading}
+                onPress={() => void submitPasskey()}
+              />
+            </>
+          ) : null}
           {GOOGLE_SIGN_IN_ENABLED ? (
             <GoogleAuthButton
               disabled={loading || passkeyLoading}

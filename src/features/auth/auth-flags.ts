@@ -5,3 +5,9 @@
  * changes are required.
  */
 export const GOOGLE_SIGN_IN_ENABLED = true;
+
+/**
+ * Passkey authentication is hidden/disabled per user request.
+ */
+export const PASSKEY_ENABLED = false;
+

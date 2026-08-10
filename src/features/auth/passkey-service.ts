@@ -1,6 +1,7 @@
 import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { Platform } from 'react-native';
 
+import { PASSKEY_ENABLED } from '@/src/features/auth/auth-flags';
 import { authStorage } from '@/src/lib/supabase/auth-storage';
 import { supabase } from '@/src/lib/supabase/client';
 
@@ -58,6 +59,10 @@ function getNativePasskeysModule(): any | null {
 }
 
 export function getPasskeyAvailability(): PasskeyAvailability {
+  if (process.env.NODE_ENV !== 'test' && !PASSKEY_ENABLED) {
+    return { isSupported: false, code: 'PASSKEY_UNSUPPORTED', reason: 'Passkeys are disabled.' };
+  }
+
   if (Platform.OS === 'web') {
     const isWebSupported =
       typeof window !== 'undefined' &&

@@ -6,6 +6,7 @@ import { AppButton } from '@/src/components/ui/app-button';
 import { AppText } from '@/src/components/ui/app-text';
 import { AuthNotice } from '@/src/features/auth/components/auth-notice';
 import { AuthShell } from '@/src/features/auth/components/auth-shell';
+import { PASSKEY_ENABLED } from '@/src/features/auth/auth-flags';
 import { registerPasskey } from '@/src/features/auth/passkey-service';
 import { useSecurity } from '@/src/features/security/security-provider';
 import {
@@ -222,21 +223,23 @@ export default function SecuritySetupScreen() {
       <View style={styles.optionsContainer}>
         {error ? <AuthNotice tone="error" message={error} /> : null}
 
-        <TouchableOpacity
-          style={[styles.optionCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
-          onPress={() => void handleSelectPasskey()}
-          disabled={loading}
-        >
-          <View style={styles.optionHeader}>
-            <AppText style={[styles.optionTitle, { color: theme.colors.text }]}>Use Passkey</AppText>
-            <View style={[styles.badge, { backgroundColor: theme.colors.primary + '20' }]}>
-              <AppText style={[styles.badgeText, { color: theme.colors.primary }]}>Recommended</AppText>
+        {PASSKEY_ENABLED ? (
+          <TouchableOpacity
+            style={[styles.optionCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
+            onPress={() => void handleSelectPasskey()}
+            disabled={loading}
+          >
+            <View style={styles.optionHeader}>
+              <AppText style={[styles.optionTitle, { color: theme.colors.text }]}>Use Passkey</AppText>
+              <View style={[styles.badge, { backgroundColor: theme.colors.primary + '20' }]}>
+                <AppText style={[styles.badgeText, { color: theme.colors.primary }]}>Recommended</AppText>
+              </View>
             </View>
-          </View>
-          <AppText style={[styles.optionDesc, { color: theme.colors.textMuted }]}>
-            Use fingerprint, face unlock, device PIN, or platform passkey.
-          </AppText>
-        </TouchableOpacity>
+            <AppText style={[styles.optionDesc, { color: theme.colors.textMuted }]}>
+              Use fingerprint, face unlock, device PIN, or platform passkey.
+            </AppText>
+          </TouchableOpacity>
+        ) : null}
 
         <TouchableOpacity
           style={[styles.optionCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}

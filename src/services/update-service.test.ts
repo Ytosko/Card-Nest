@@ -26,7 +26,7 @@ vi.mock('expo-updates', () => ({
   reloadAsync: vi.fn(() => Promise.resolve()),
 }));
 
-vi.mock('expo-file-system', () => ({
+vi.mock('expo-file-system/legacy', () => ({
   documentDirectory: 'file:///app-docs/',
   createDownloadResumable: vi.fn(),
   getContentUriAsync: vi.fn(),

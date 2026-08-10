@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppButton } from '@/src/components/ui/app-button';
 import { AppText } from '@/src/components/ui/app-text';
+import { PASSKEY_ENABLED } from '@/src/features/auth/auth-flags';
 import {
   deletePasskey,
   listUserPasskeys,
@@ -237,60 +238,62 @@ export default function SecuritySettingsScreen() {
         </View>
 
         {/* SECTION 2: ACCOUNT PASSKEYS */}
-        <View style={styles.section}>
-          <AppText variant="title">Account Sign-In Passkeys</AppText>
-          <AppText muted variant="caption">
-            Passkeys registered to your Card Nest account across all your devices.
-          </AppText>
+        {PASSKEY_ENABLED ? (
+          <View style={styles.section}>
+            <AppText variant="title">Account Sign-In Passkeys</AppText>
+            <AppText muted variant="caption">
+              Passkeys registered to your Card Nest account across all your devices.
+            </AppText>
 
-          {loading ? (
-            <ActivityIndicator color={theme.colors.primary} style={{ marginVertical: 16 }} />
-          ) : (
-            <View style={{ gap: 12 }}>
-              {passkeys.length === 0 ? (
-                <View style={[styles.emptyCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
-                  <MaterialCommunityIcons name="fingerprint-off" size={32} color={theme.colors.textMuted} />
-                  <AppText variant="label">No account passkeys registered</AppText>
-                  <AppText muted variant="caption" style={{ textAlign: 'center' }}>
-                    Add a passkey to sign in to your Card Nest account without passwords.
-                  </AppText>
-                </View>
-              ) : (
-                passkeys.map((item) => (
-                  <View
-                    key={item.id}
-                    style={[styles.card, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}
-                  >
-                    <View style={styles.row}>
-                      <View style={styles.rowLeft}>
-                        <MaterialCommunityIcons name="fingerprint" size={24} color={theme.colors.primary} />
-                        <View>
-                          <AppText variant="label">{item.name}</AppText>
-                          <AppText muted variant="caption">
-                            Created {new Date(item.createdAt).toLocaleDateString()}
-                          </AppText>
+            {loading ? (
+              <ActivityIndicator color={theme.colors.primary} style={{ marginVertical: 16 }} />
+            ) : (
+              <View style={{ gap: 12 }}>
+                {passkeys.length === 0 ? (
+                  <View style={[styles.emptyCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
+                    <MaterialCommunityIcons name="fingerprint-off" size={32} color={theme.colors.textMuted} />
+                    <AppText variant="label">No account passkeys registered</AppText>
+                    <AppText muted variant="caption" style={{ textAlign: 'center' }}>
+                      Add a passkey to sign in to your Card Nest account without passwords.
+                    </AppText>
+                  </View>
+                ) : (
+                  passkeys.map((item) => (
+                    <View
+                      key={item.id}
+                      style={[styles.card, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}
+                    >
+                      <View style={styles.row}>
+                        <View style={styles.rowLeft}>
+                          <MaterialCommunityIcons name="fingerprint" size={24} color={theme.colors.primary} />
+                          <View>
+                            <AppText variant="label">{item.name}</AppText>
+                            <AppText muted variant="caption">
+                              Created {new Date(item.createdAt).toLocaleDateString()}
+                            </AppText>
+                          </View>
+                        </View>
+                        <View style={styles.actions}>
+                          <TouchableOpacity style={styles.actionIcon} onPress={() => handleRename(item)}>
+                            <MaterialCommunityIcons name="pencil-outline" size={20} color={theme.colors.text} />
+                          </TouchableOpacity>
+                          <TouchableOpacity style={styles.actionIcon} onPress={() => handleDelete(item)}>
+                            <MaterialCommunityIcons name="trash-can-outline" size={20} color={theme.colors.danger} />
+                          </TouchableOpacity>
                         </View>
                       </View>
-                      <View style={styles.actions}>
-                        <TouchableOpacity style={styles.actionIcon} onPress={() => handleRename(item)}>
-                          <MaterialCommunityIcons name="pencil-outline" size={20} color={theme.colors.text} />
-                        </TouchableOpacity>
-                        <TouchableOpacity style={styles.actionIcon} onPress={() => handleDelete(item)}>
-                          <MaterialCommunityIcons name="trash-can-outline" size={20} color={theme.colors.danger} />
-                        </TouchableOpacity>
-                      </View>
                     </View>
-                  </View>
-                ))
-              )}
+                  ))
+                )}
 
-              <AppButton loading={adding} onPress={() => void handleAddPasskey()}>
-                <MaterialCommunityIcons name="plus" size={18} color="#fff" style={{ marginRight: 6 }} />
-                Add Account Passkey
-              </AppButton>
-            </View>
-          )}
-        </View>
+                <AppButton loading={adding} onPress={() => void handleAddPasskey()}>
+                  <MaterialCommunityIcons name="plus" size={18} color="#fff" style={{ marginRight: 6 }} />
+                  Add Account Passkey
+                </AppButton>
+              </View>
+            )}
+          </View>
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   );
