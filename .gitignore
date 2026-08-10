@@ -57,3 +57,4 @@ app-example
 # Local Android release artifacts
 Card-Nest-*-android.apk
 Card-Nest-*-android.aab
+cardnest-release.json

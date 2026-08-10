@@ -27,6 +27,13 @@ export interface NativeReleaseAsset {
   sha256?: string;
 }
 
+export interface ReleaseMetadata {
+  versionName: string;
+  versionCode: number;
+  platform: string;
+  apkAsset: string;
+}
+
 export interface NativeRelease {
   versionName: string;
   versionCode?: number;
@@ -34,6 +41,7 @@ export interface NativeRelease {
   releaseNotes: string;
   publishedAt: string;
   asset: NativeReleaseAsset;
+  metadata?: ReleaseMetadata;
 }
 
 export interface DownloadedApkMetadata {
@@ -193,22 +201,39 @@ function compareSemVer(left: string, right: string): number {
   return 0;
 }
 
-export function isNewerVersion(current: VersionInfo, latestTag: string, latestNotes: string): boolean {
+export function isNewerVersion(
+  current: VersionInfo,
+  latestTag: string,
+  latestNotes: string,
+  latestVersionCode?: number,
+): boolean {
   const candidate = normalizeVersionName(latestTag);
-  if (candidate === current.versionName) return false;
-
   const currentChannel = getReleaseChannel(current.versionName);
   const candidateChannel = getReleaseChannel(candidate);
   if (!acceptsReleaseChannel(currentChannel, candidateChannel)) return false;
 
+  // Primary upgrade ordering signal for Android: versionCode comparison
+  const candidateCode = latestVersionCode ?? parseVersionCodeFromRelease(latestTag, latestNotes);
+
+  if (candidateCode !== undefined && candidateCode > 0 && current.versionCode > 0) {
+    const isNewer = candidateCode > current.versionCode;
+    logUpdateDiagnostic('version_code_check', {
+      installedVersionName: current.versionName,
+      installedVersionCode: current.versionCode,
+      candidateVersionName: candidate,
+      candidateVersionCode: candidateCode,
+      isNewer,
+    });
+    return isNewer;
+  }
+
+  // Fallback when versionCode is absent: compare semver monotonically.
+  // Never offer an update if semver indicates candidate is lower or equal.
+  if (candidate === current.versionName) return false;
   const semverComparison = compareSemVer(candidate, current.versionName);
-  if (semverComparison !== 0) return semverComparison > 0;
+  if (semverComparison > 0) return true;
 
-  const rankComparison = channelRank(candidateChannel) - channelRank(currentChannel);
-  if (rankComparison !== 0) return rankComparison > 0;
-
-  const candidateCode = parseVersionCodeFromRelease(latestTag, latestNotes);
-  return candidateCode !== undefined && candidateCode > current.versionCode;
+  return false;
 }
 
 export function isOfficialApkAsset(
@@ -268,6 +293,9 @@ export function parseGithubRelease(release: GithubRelease): NativeRelease | null
 }
 
 function compareReleases(left: NativeRelease, right: NativeRelease): number {
+  if (left.versionCode && right.versionCode && left.versionCode !== right.versionCode) {
+    return left.versionCode - right.versionCode;
+  }
   const semverComparison = compareSemVer(left.versionName, right.versionName);
   if (semverComparison !== 0) return semverComparison;
   const channelComparison = channelRank(getReleaseChannel(left.versionName)) - channelRank(getReleaseChannel(right.versionName));
@@ -328,12 +356,47 @@ export async function checkForAppUpdate(
     if (!Array.isArray(payload)) throw new Error('Release server returned an invalid response.');
 
     const currentChannel = getReleaseChannel(current.versionName);
-    const releases = payload
+    const parsedReleases = payload
       .map((item) => parseGithubRelease(item as GithubRelease))
       .filter((item): item is NativeRelease => Boolean(item))
-      .filter((item) => acceptsReleaseChannel(currentChannel, getReleaseChannel(item.versionName)))
-      .sort((left, right) => compareReleases(right, left));
-    const latest = releases.find((item) => isNewerVersion(current, item.tagName, item.releaseNotes));
+      .filter((item) => acceptsReleaseChannel(currentChannel, getReleaseChannel(item.versionName)));
+
+    // Fetch machine-readable metadata (cardnest-release.json) for candidate releases if present
+    for (const rel of parsedReleases) {
+      const rawRelease = (payload as GithubRelease[]).find(
+        (r) => typeof r.tag_name === 'string' && r.tag_name.trim() === rel.tagName
+      );
+      const assets = Array.isArray(rawRelease?.assets) ? (rawRelease?.assets as GithubAsset[]) : [];
+      const metaAsset = assets.find((a) => a.name === 'cardnest-release.json');
+      if (metaAsset && typeof metaAsset.browser_download_url === 'string') {
+        try {
+          const metaResp = await expoFetch(metaAsset.browser_download_url, {
+            headers: { Accept: 'application/json', 'User-Agent': 'Card-Nest-Android' },
+          });
+          if (metaResp.ok) {
+            const metaJson = (await metaResp.json()) as ReleaseMetadata;
+            if (metaJson && typeof metaJson.versionCode === 'number' && Number.isSafeInteger(metaJson.versionCode)) {
+              rel.versionCode = metaJson.versionCode;
+              rel.metadata = metaJson;
+            }
+          }
+        } catch {
+          // Gracefully fall back to notes parsing / semver if metadata asset cannot be fetched
+        }
+      }
+    }
+
+    const sortedReleases = [...parsedReleases].sort((left, right) => compareReleases(right, left));
+    const latest = sortedReleases.find((item) => isNewerVersion(current, item.tagName, item.releaseNotes, item.versionCode));
+
+    logUpdateDiagnostic('update_check_completed', {
+      installedVersionName: current.versionName,
+      installedVersionCode: current.versionCode,
+      githubReleaseTag: latest?.tagName || null,
+      parsedReleaseVersionName: latest?.versionName || null,
+      parsedReleaseVersionCode: latest?.versionCode || null,
+      updateAvailable: Boolean(latest),
+    });
 
     cachedCheck = {
       isUpdateAvailable: Boolean(latest) || otaStatus.isAvailable,

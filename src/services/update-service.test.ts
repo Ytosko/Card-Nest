@@ -209,11 +209,40 @@ describe('native update release selection', () => {
     expect(getReleaseChannel('1.0.0-alpha-test')).toBe('alpha');
   });
 
-  it('only treats a same-semver build as newer with an explicit higher versionCode', () => {
-    const current = { versionName: '1.0.2-beta-old', versionCode: 11 };
-    expect(isNewerVersion(current, 'v1.0.2-beta-new', 'No Android build metadata')).toBe(false);
-    expect(isNewerVersion(current, 'v1.0.2-beta-new', 'versionCode: 12')).toBe(true);
-    expect(parseVersionCodeFromRelease('ignored', 'versionCode = 12')).toBe(12);
+  it('only treats a build as newer when versionCode is higher, ignoring display versionName ordering', () => {
+    const current = { versionName: '1.0.5-beta-f0D3X', versionCode: 14 };
+
+    // Higher versionCode with lower display versionName (e.g., 1.0.2-X0811 with versionCode 16 > 14)
+    expect(isNewerVersion(current, 'v1.0.2-X0811', '', 16)).toBe(true);
+
+    // Same versionCode
+    expect(isNewerVersion(current, 'v1.0.2-X0811', '', 14)).toBe(false);
+
+    // Lower versionCode
+    expect(isNewerVersion(current, 'v1.0.2-X0811', '', 13)).toBe(false);
+
+    // Higher versionCode
+    expect(isNewerVersion(current, 'v1.0.6-beta', '', 15)).toBe(true);
+  });
+
+  it('safely falls back without offering invalid downgrades when versionCode is missing', () => {
+    const current = { versionName: '1.0.5-beta-f0D3X', versionCode: 14 };
+
+    // Display versionName is semantically lower and no versionCode provided -> no update (prevents false downgrade)
+    expect(isNewerVersion(current, 'v1.0.2-X0811', '')).toBe(false);
+
+    // Display versionName is semantically higher and no versionCode provided -> accepts update
+    expect(isNewerVersion(current, 'v1.0.6', '')).toBe(true);
+  });
+
+  it('handles GitHub release service failures gracefully without crashing app', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: false,
+      status: 503,
+    })));
+    const result = await checkForAppUpdate(true);
+    expect(result.isNativeUpdateAvailable).toBe(false);
+    expect(result.error).toContain('503');
   });
 
   it('does not offer alpha releases to beta users or beta releases to stable users', () => {
@@ -241,21 +270,35 @@ describe('native update release selection', () => {
     expect(parseGithubRelease({ tag_name: release.tagName, assets: [{ name: 'random.apk', size: assetSize }] })).toBeNull();
   });
 
-  it('selects the verified newer release from GitHub', async () => {
+  it('selects the verified newer release from GitHub using cardnest-release.json metadata', async () => {
+    testState.expoFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        versionName: '1.0.2-X0811',
+        versionCode: 16,
+        platform: 'android',
+        apkAsset: 'Card-Nest-1.0.2-X0811-android.apk',
+      }),
+    });
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: true,
       status: 200,
       json: async () => [{
-        tag_name: release.tagName,
-        body: release.releaseNotes,
+        tag_name: 'v1.0.2-X0811',
+        body: 'Release 1.0.2-X0811',
         published_at: release.publishedAt,
         draft: false,
-        assets: [{ name: release.asset.name, browser_download_url: release.asset.url, size: assetSize }],
+        assets: [
+          { name: 'Card-Nest-1.0.2-X0811-android.apk', browser_download_url: 'https://github.com/Ytosko/Card-Nest/releases/download/v1.0.2-X0811/Card-Nest-1.0.2-X0811-android.apk', size: assetSize },
+          { name: 'cardnest-release.json', browser_download_url: 'https://github.com/Ytosko/Card-Nest/releases/download/v1.0.2-X0811/cardnest-release.json', size: 120 },
+        ],
       }],
     })));
     const result = await checkForAppUpdate(true);
     expect(result.isNativeUpdateAvailable).toBe(true);
-    expect(result.latestVersion?.versionName).toBe(release.versionName);
+    expect(result.latestVersion?.versionName).toBe('1.0.2-X0811');
+    expect(result.latestVersion?.versionCode).toBe(16);
   });
 });
 
