@@ -144,7 +144,8 @@ export function WebPinGate({ children, userId, email }: { children: React.ReactN
     const onPolicy = () => syncConfig();
     const onSafeTransition = () => {
       const currentConfig = configRef.current;
-      const currentSession = sessionRef.current;
+      const currentSession = readWebUnlockSession(sessionStorage, userId);
+      sessionRef.current = currentSession;
       if (currentConfig && !isWebUnlockSessionValid(currentSession, userId, currentConfig)) lock();
     };
     window.addEventListener('storage', onStorage);
@@ -167,7 +168,9 @@ export function WebPinGate({ children, userId, email }: { children: React.ReactN
   useEffect(() => {
     if (!unlocked || !config) return;
     const checkExpiration = () => {
-      expiredRef.current = !isWebUnlockSessionValid(sessionRef.current, userId, config);
+      const currentSession = readWebUnlockSession(sessionStorage, userId);
+      sessionRef.current = currentSession;
+      expiredRef.current = !isWebUnlockSessionValid(currentSession, userId, config);
     };
     const onVisibility = () => {
       checkExpiration();

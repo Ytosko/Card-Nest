@@ -2,13 +2,16 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  clearAllWebUnlockSessions,
   createWebLockConfig,
   createWebUnlockSession,
   isWebUnlockSessionValid,
   readWebLockConfig,
+  readWebUnlockSession,
   rebaseWebUnlockSession,
   timeoutMilliseconds,
   verifyWebPin,
+  writeWebUnlockSession,
 } from '../lib/web-lock.ts';
 
 class MemoryStorage {
@@ -45,6 +48,16 @@ test('web timeout policies rebase the same temporary unlock proof', async () => 
   assert.equal(rebaseWebUnlockSession(session, '1h').expiresAt, 1000 + timeoutMilliseconds('1h'));
   assert.equal(rebaseWebUnlockSession(session, '12h').expiresAt, 1000 + timeoutMilliseconds('12h'));
   assert.equal(rebaseWebUnlockSession(session, 'restart').expiresAt, Number.MAX_SAFE_INTEGER);
+});
+
+test('clearing local security state invalidates every temporary account unlock', async () => {
+  const storage = new MemoryStorage();
+  const config = await createWebLockConfig('123456');
+  writeWebUnlockSession(storage, createWebUnlockSession('user-a', config, 1000));
+  writeWebUnlockSession(storage, createWebUnlockSession('user-b', config, 1000));
+  clearAllWebUnlockSessions(storage);
+  assert.equal(readWebUnlockSession(storage, 'user-a'), null);
+  assert.equal(readWebUnlockSession(storage, 'user-b'), null);
 });
 
 test('legacy minute policies migrate without replacing verifier material', () => {
