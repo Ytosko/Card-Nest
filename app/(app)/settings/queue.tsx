@@ -1,7 +1,7 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Stack } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Modal, ScrollView, StyleSheet, View } from 'react-native';
+import { Modal, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppButton } from '@/src/components/ui/app-button';
@@ -9,6 +9,7 @@ import { AppText } from '@/src/components/ui/app-text';
 import { EmptyState } from '@/src/components/ui/empty-state';
 import { AuthNotice } from '@/src/features/auth/components/auth-notice';
 import { useCaptureQueue } from '@/src/features/capture/capture-queue-provider';
+import { CompactQueueRow } from '@/src/features/capture/components/compact-queue-row';
 import { useAppTheme } from '@/src/theme/theme-provider';
 
 export default function QueueScreen() {
@@ -135,89 +136,18 @@ export default function QueueScreen() {
             title="Everything is synced"
           />
         ) : (
-          queue.items.map((item) => {
-            const isFailed = item.state === 'failed';
-            const isSynced = item.state === 'synced';
-            const isUploading = item.state === 'uploading' || item.state === 'processing';
-
-            return (
-              <View
+          <View style={{ gap: 2 }}>
+            {queue.items.map((item) => (
+              <CompactQueueRow
                 key={item.id}
-                style={[
-                  styles.item,
-                  {
-                    backgroundColor: theme.colors.surface,
-                    borderColor: isFailed ? theme.colors.warning : theme.colors.border,
-                    borderRadius: theme.radii.lg,
-                    padding: theme.spacing[4],
-                  },
-                ]}>
-                <MaterialCommunityIcons
-                  color={
-                    isFailed ? theme.colors.warning : isSynced ? theme.colors.success : theme.colors.primary
-                  }
-                  name={
-                    isFailed
-                      ? 'cloud-alert-outline'
-                      : isSynced
-                      ? 'cloud-check-outline'
-                      : isUploading
-                      ? 'cloud-upload-outline'
-                      : 'clock-outline'
-                  }
-                  size={26}
-                />
-
-                <View style={styles.copy}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <AppText variant="bodyStrong">
-                      {isFailed
-                        ? 'Upload paused'
-                        : isSynced
-                        ? 'Synced'
-                        : item.state === 'uploading'
-                        ? 'Uploading images...'
-                        : item.state === 'processing'
-                        ? 'Extracting contact...'
-                        : 'Waiting to upload'}
-                    </AppText>
-
-                    {item.attemptCount > 1 ? (
-                      <AppText muted variant="caption">
-                        (Attempt {item.attemptCount})
-                      </AppText>
-                    ) : null}
-                  </View>
-
-                  <AppText muted variant="caption">
-                    {item.lastError || `Captured ${new Date(item.createdAt).toLocaleString()}`}
-                  </AppText>
-                </View>
-
-                {isFailed ? (
-                  <View style={styles.failedActions}>
-                    <AppButton
-                      disabled={isBusy}
-                      onPress={() => void queue.retry(item.id)}
-                      variant="secondary">
-                      Retry
-                    </AppButton>
-                    <AppButton
-                      disabled={isBusy}
-                      loading={deletingItemId === item.id}
-                      onPress={() => void handleDeleteSingle(item.id)}
-                      style={{ borderColor: theme.colors.danger }}
-                      textColor={theme.colors.danger}
-                      variant="secondary">
-                      Delete
-                    </AppButton>
-                  </View>
-                ) : isUploading ? (
-                  <ActivityIndicator color={theme.colors.primary} size="small" />
-                ) : null}
-              </View>
-            );
-          })
+                isBusy={isBusy}
+                isDeletingThisItem={deletingItemId === item.id}
+                item={item}
+                onDelete={(id) => void handleDeleteSingle(id)}
+                onRetry={(id) => void queue.retry(id)}
+              />
+            ))}
+          </View>
         )}
 
         {/* Clear Completed Action */}

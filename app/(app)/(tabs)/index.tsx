@@ -2,7 +2,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -16,21 +16,28 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BrandMark } from '@/src/components/brand-mark';
+import { AlphabetSectionHeader } from '@/src/components/ui/alphabet-section-header';
 import { AppButton } from '@/src/components/ui/app-button';
 import { AppText } from '@/src/components/ui/app-text';
+import { AZFastScrollIndex } from '@/src/components/ui/az-fast-scroll-index';
 import { EmptyState } from '@/src/components/ui/empty-state';
 import { UserAvatar } from '@/src/components/ui/user-avatar';
 import { AuthNotice } from '@/src/features/auth/components/auth-notice';
 import { useAuth } from '@/src/features/auth/auth-provider';
 import { cardKeys, useCards } from '@/src/features/cards/card-hooks';
-import { CardListRow } from '@/src/features/cards/components/card-list-row';
+import { CompactContactRow } from '@/src/features/cards/components/compact-contact-row';
 import { bulkDeleteCards, bulkToggleFavorite, isSavedContact, markCardExported } from '@/src/features/cards/card-service';
 import { exportCardsToContacts } from '@/src/features/contacts/contact-export';
 import { useCaptureQueue } from '@/src/features/capture/capture-queue-provider';
 import { useAppTheme } from '@/src/theme/theme-provider';
+import type { Card } from '@/src/types/database.helpers';
 
 type FilterChipMode = 'all' | 'recent' | 'favorites';
 type SortMode = 'recent' | 'name';
+
+type ListItem =
+  | { type: 'header'; id: string; letter: string }
+  | { type: 'card'; id: string; card: Card };
 
 export default function ContactsScreen() {
   const theme = useAppTheme();
@@ -111,6 +118,48 @@ export default function ContactsScreen() {
         return (b.updated_at || b.created_at).localeCompare(a.updated_at || a.created_at);
       });
   }, [rawCards, input, activeChip, sortMode]);
+
+  const flatListRef = useRef<FlatList<ListItem>>(null);
+
+  const { displayItems, availableSections, sectionIndexMap } = useMemo(() => {
+    if (sortMode !== 'name') {
+      return {
+        displayItems: filteredCards.map((card) => ({ type: 'card' as const, id: card.id, card })),
+        availableSections: new Set<string>(),
+        sectionIndexMap: new Map<string, number>(),
+      };
+    }
+
+    const items: ListItem[] = [];
+    const sections = new Set<string>();
+    const indexMap = new Map<string, number>();
+
+    let currentLetter = '';
+    filteredCards.forEach((card) => {
+      const nameStr = (card.display_name || card.company || '').trim();
+      const firstChar = nameStr.charAt(0).toUpperCase();
+      const letter = /[A-Z]/.test(firstChar) ? firstChar : '#';
+      if (letter !== currentLetter) {
+        currentLetter = letter;
+        sections.add(letter);
+        indexMap.set(letter, items.length);
+        items.push({ type: 'header', id: `header-${letter}`, letter });
+      }
+      items.push({ type: 'card', id: card.id, card });
+    });
+
+    return { displayItems: items, availableSections: sections, sectionIndexMap: indexMap };
+  }, [filteredCards, sortMode]);
+
+  const handleSelectLetter = useCallback(
+    (letter: string) => {
+      const targetIdx = sectionIndexMap.get(letter);
+      if (targetIdx !== undefined && flatListRef.current) {
+        flatListRef.current.scrollToIndex({ index: targetIdx, animated: true, viewPosition: 0 });
+      }
+    },
+    [sectionIndexMap],
+  );
 
   const hasAnyContacts = rawCards.length > 0;
   const hasAnyRecords = hasAnyContacts || pendingQueue.length > 0;
@@ -270,14 +319,19 @@ export default function ContactsScreen() {
       </Modal>
 
       <FlatList
+        ref={flatListRef}
         contentContainerStyle={[
           styles.content,
-          { gap: theme.spacing[3], padding: theme.spacing[5] },
+          { paddingBottom: theme.spacing[8], paddingHorizontal: theme.spacing[4], paddingTop: theme.spacing[3] },
           !hasAnyContacts && styles.grow,
         ]}
-        data={filteredCards}
+        data={displayItems}
+        initialNumToRender={20}
         keyExtractor={(item) => item.id}
         keyboardShouldPersistTaps="handled"
+        maxToRenderPerBatch={20}
+        removeClippedSubviews={true}
+        windowSize={11}
         ListEmptyComponent={
           cardsQuery.isLoading ? (
             <ActivityIndicator color={theme.colors.primary} style={styles.loader} />
@@ -442,23 +496,33 @@ export default function ContactsScreen() {
         }
         ListHeaderComponentStyle={{ marginBottom: theme.spacing[2] }}
         refreshControl={<RefreshControl refreshing={cardsQuery.isRefetching} onRefresh={() => void cardsQuery.refetch()} tintColor={theme.colors.primary} />}
-        renderItem={({ item }) => (
-          <CardListRow
-            card={item}
-            isSelectionMode={isSelectionMode}
-            isSelected={selectedIds.has(item.id)}
-            onLongPress={() => {
-              if (!isSelectionMode) {
-                enterSelectionMode(item.id);
-              } else {
-                toggleCardSelection(item.id);
-              }
-            }}
-            onPress={() => router.push({ pathname: '/(app)/cards/[id]', params: { id: item.id } })}
-            onSelectToggle={() => toggleCardSelection(item.id)}
-          />
-        )}
+        renderItem={({ item }) => {
+          if (item.type === 'header') {
+            return <AlphabetSectionHeader title={item.letter} />;
+          }
+          return (
+            <CompactContactRow
+              card={item.card}
+              isSelectionMode={isSelectionMode}
+              isSelected={selectedIds.has(item.card.id)}
+              onLongPress={() => {
+                if (!isSelectionMode) {
+                  enterSelectionMode(item.card.id);
+                } else {
+                  toggleCardSelection(item.card.id);
+                }
+              }}
+              onPress={() => router.push({ pathname: '/(app)/cards/[id]', params: { id: item.card.id } })}
+              onSelectToggle={() => toggleCardSelection(item.card.id)}
+            />
+          );
+        }}
       />
+
+      {/* Side A-Z Fast-Scroll Index */}
+      {sortMode === 'name' && availableSections.size > 0 && !isSelectionMode ? (
+        <AZFastScrollIndex availableSections={availableSections} onSelectLetter={handleSelectLetter} />
+      ) : null}
 
       {/* Floating Bottom Bulk Action Toolbar */}
       {isSelectionMode && selectedCount > 0 ? (
