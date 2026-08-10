@@ -54,6 +54,11 @@ export function SiteHeader() {
               {link.label}
             </Link>
           ))}
+          <Link
+            className="focus-ring ml-1 inline-flex min-h-11 items-center rounded-xl bg-[#0CC0DF] px-4 text-sm font-bold text-[#052f36] transition hover:bg-[#08afcb]"
+            href="/auth?mode=signin">
+            Log in
+          </Link>
         </nav>
 
         {/* Mobile Hamburger Toggle Button */}
@@ -114,6 +119,12 @@ export function SiteHeader() {
                   {link.label}
                 </Link>
               ))}
+              <Link
+                className="focus-ring mt-2 flex min-h-12 items-center justify-center rounded-xl bg-[#0CC0DF] px-4 text-base font-bold text-[#052f36] transition hover:bg-[#08afcb]"
+                href="/auth?mode=signin"
+                onClick={closeMenu}>
+                Log in to web app
+              </Link>
             </nav>
           </div>
         </div>

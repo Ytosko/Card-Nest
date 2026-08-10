@@ -13,13 +13,15 @@ Card Nest uses Supabase Auth with email/password accounts, mandatory confirmatio
 - `/(app)/(tabs)/index` — authenticated dashboard entry
 - `/profile` — photo/details, secure email change, sign-out, and account deletion
 
-`AuthProvider` restores the persisted Supabase session, listens for auth events, refreshes the matching profile, and supplies guarded route state. Native builds use Expo SQLite-backed local storage. Web uses browser local storage with an in-memory static-render fallback.
+`AuthProvider` restores the persisted Supabase session, listens for auth events, refreshes the matching profile, and supplies guarded mobile route state. Native builds use Expo SQLite-backed local storage. The production Next.js web application uses secure Supabase SSR cookies and server-side route guards independently of the Expo web preview.
 
 ## First-party links
 
 The stable production scheme is `cardnest://auth/callback`. The public web callback and hosted Site URL are both `https://cardnest.ytosko.dev/auth/callback` / `https://cardnest.ytosko.dev`.
 
-Every transactional email links directly to the Card Nest domain with a one-time token hash. The page removes the token from browser history before making a same-origin POST to `/api/auth/verify`. That server route verifies with the public anon/publishable key; the browser is never navigated to a Supabase hostname. A returned session is handed to the installed app through the custom scheme. Recovery sessions continue to the reset-password screen.
+Every transactional email links directly to the Card Nest domain with a one-time token hash. The Next.js `/auth/callback` route verifies the hash server-side, stores the session in secure SSR cookies, and then offers explicit first-party choices to continue on the web or open the installed app. Recovery sessions continue to the branded web reset page or mobile reset flow. The browser is never sent to a Supabase-hosted page for email confirmation or recovery.
+
+Google OAuth remains a standards-based provider redirect. Users necessarily visit Google and the configured Supabase Auth authorization endpoint unless the project later receives a Supabase custom domain. Card Nest keeps the application callback and post-auth destination first-party and separates web `/auth/callback` from the working mobile `/gauth/callback` relay.
 
 Expired, already-used, malformed, rate-limited, and temporarily unavailable links stay on the branded Card Nest page with safe messages. Email-change approvals may return no session; the app opens normally and restores any existing session.
 

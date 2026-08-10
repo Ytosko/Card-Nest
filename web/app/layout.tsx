@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 
-import { SiteFooter } from '@/components/site-footer';
-import { SiteHeader } from '@/components/site-header';
+import { PageChrome } from '@/components/page-chrome';
+import { ServiceWorkerRegistration } from '@/components/service-worker-registration';
 
 import './globals.css';
 
@@ -47,11 +47,8 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="en">
       <body>
-        <div className="page-shell flex min-h-screen flex-col">
-          <SiteHeader />
-          <main className="flex-1">{children}</main>
-          <SiteFooter />
-        </div>
+        <ServiceWorkerRegistration />
+        <PageChrome>{children}</PageChrome>
       </body>
     </html>
   );

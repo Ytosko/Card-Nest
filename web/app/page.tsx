@@ -72,6 +72,11 @@ export default function HomePage() {
           <div className="mt-8 flex flex-col gap-3.5 sm:mt-9 sm:flex-row sm:flex-wrap sm:gap-4">
             <Link
               className="focus-ring inline-flex min-h-12 items-center justify-center rounded-xl bg-[#079cb8] px-6 font-bold text-white transition hover:bg-[#067a90] active:scale-98"
+              href="/auth?mode=signin">
+              Log in to web app
+            </Link>
+            <Link
+              className="focus-ring inline-flex min-h-12 items-center justify-center rounded-xl border border-[#bfd5da] bg-white px-6 font-bold text-[#334a50] transition hover:border-[#0CC0DF] hover:text-[#067a90]"
               href="/#what-card-nest-does">
               See what Card Nest does
             </Link>

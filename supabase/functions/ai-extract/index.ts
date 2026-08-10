@@ -15,7 +15,8 @@ function json(body: Record<string, unknown>, status = 200) {
 
 // Master encryption key
 async function getEncryptionKey(): Promise<CryptoKey> {
-  const secret = Deno.env.get('AI_CREDENTIAL_ENCRYPTION_KEY') || 'cardnest_master_ai_credential_secret_key_v1_32bytes!!';
+  const secret = Deno.env.get('AI_CREDENTIAL_ENCRYPTION_KEY');
+  if (!secret || secret.length < 32) throw new Error('AI credential encryption is not configured.');
   const encoder = new TextEncoder();
   const keyData = encoder.encode(secret.padEnd(32, '!').slice(0, 32));
   return crypto.subtle.importKey('raw', keyData, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
@@ -295,7 +296,7 @@ Deno.serve(async (request) => {
             code: classifyProviderError(response.status, errBody),
             provider: 'openai',
             providerStatus: response.status,
-            message: `OpenAI API (${response.status}): ${errBody.slice(0, 150)}`,
+            message: response.status === 401 || response.status === 403 ? 'OpenAI rejected this credential. Replace or verify the saved key.' : response.status === 429 ? 'OpenAI rate limit reached. Wait briefly and try again.' : 'OpenAI could not process this card with the selected model.',
           }, 200);
         }
         const body = await response.json();
@@ -332,7 +333,7 @@ Deno.serve(async (request) => {
             code: classifyProviderError(response.status, errBody),
             provider: 'gemini',
             providerStatus: response.status,
-            message: `Gemini API (${response.status}): ${errBody.slice(0, 150)}`,
+            message: response.status === 401 || response.status === 403 ? 'Gemini rejected this credential. Replace or verify the saved key.' : response.status === 429 ? 'Gemini rate limit reached. Wait briefly and try again.' : 'Gemini could not process this card with the selected model.',
           }, 200);
         }
         const body = await response.json();
@@ -349,7 +350,7 @@ Deno.serve(async (request) => {
 
     try {
       const parsedJson = JSON.parse(extractedText);
-      return json({ ok: true, result: parsedJson });
+      return json({ ok: true, result: parsedJson, provider, model });
     } catch {
       return json({ ok: false, code: 'AI_RESPONSE_INVALID', message: 'Provider output failed JSON parsing.' }, 200);
     }

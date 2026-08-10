@@ -1,0 +1,48 @@
+# Card Nest web application
+
+The production Next.js application in `web/` serves both the public Card Nest website and the authenticated product from one Coolify container and one domain: `https://cardnest.ytosko.dev`.
+
+## Routes
+
+- `/` — public marketing and Google-verification-compliant homepage
+- `/auth`, `/auth/forgot`, `/auth/reset-password`, `/auth/callback` — first-party browser authentication
+- `/app` — private overview and recent contacts
+- `/app/contacts`, `/app/contacts/[id]` — searchable library, add/edit/detail, favorites, tags, images, multi-select, and bulk actions
+- `/app/search` — normalized and original-text search
+- `/app/scan` — upload, drag/drop, paste, and `MediaDevices` camera capture for front/back cards
+- `/app/settings/profile` — shared profile foundation
+- `/app/settings/ai` — encrypted BYOK provider credentials and dynamic model selection
+- `/app/settings/security` — browser PIN and inactivity timeout
+- `/api/app/export` — selected/all vCard and CSV exports
+
+All private reads and writes use the same hosted Supabase users, schema, RLS policies, and private Storage buckets as the mobile application. No service-role key is present in the Next.js runtime.
+
+## Browser app lock
+
+After a successful account login, each browser must create its own six-digit PIN. The plaintext PIN is never persisted or synchronized. Card Nest generates a random 128-bit salt and derives a verifier with PBKDF2-SHA-256 at 210,000 iterations through Web Crypto. Local storage contains only the versioned salt, verifier, timeout, and retry state under a per-user key.
+
+Incorrect attempts receive increasing delays. The private UI can lock immediately or after 1, 5, or 15 minutes of inactivity/visibility changes without destroying the valid Supabase session. Forgot-PIN reset requires fresh password or Google OAuth re-authentication and resets only the current browser. Google recovery uses a five-minute HttpOnly nonce that is consumed after the successful callback. Mobile PINs and browser PINs are intentionally independent. Biometrics and passkeys are not shown on the web.
+
+## AI credential boundary
+
+The browser sends a provider key only to a same-origin authenticated API route. The `ai-credentials` Edge Function tests it and stores AES-256-GCM ciphertext per user. Status endpoints return only connected state and a suffix. Dynamic model discovery and extraction decrypt the key only inside Edge Function memory; no decrypted key is returned to Next.js or browser JavaScript.
+
+The `ai-extract` function accepts up to two prepared images, applies the shared multilingual normalized schema, and returns reviewable contact data. Original front/back images are uploaded to the owner-prefixed private `card-images` bucket only after the user reviews and saves. Matching primary email or phone values trigger duplicate confirmation.
+
+## PWA and offline behavior
+
+`/app` has a branded manifest, icon, standalone display mode, theme colors, and service-worker registration. The service worker caches only public shell assets and explicitly bypasses private `/app` and `/api` requests. Card Nest does not claim offline private-data support on web.
+
+## Verification
+
+Run from the repository root:
+
+```bash
+npm run web:check
+docker compose build
+docker compose up -d
+docker compose exec -T web node -e "fetch('http://127.0.0.1:3000/api/health').then(async r => { console.log(await r.text()); if (!r.ok) process.exit(1) })"
+docker compose down
+```
+
+Use a real account in browser QA to verify account login, first browser PIN setup, unlock/recovery, shared contact edits, scan review/save, exports, session restoration, and every responsive breakpoint.

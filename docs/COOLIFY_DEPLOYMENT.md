@@ -45,7 +45,7 @@ SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
 SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_OR_PUBLISHABLE_KEY
 ```
 
-Use the same public values as `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_ANON_KEY`. The server-side callback uses them to verify email token hashes without navigating the browser to a Supabase domain. The anon/publishable key is designed for public clients; authorization remains enforced by Auth and RLS.
+Use the same public values as `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_ANON_KEY`. The server-rendered web application, secure-cookie auth callback, and same-origin API routes use them without exposing the project URL in ordinary Card Nest UI requests. The anon/publishable key is designed for public clients; authorization remains enforced by Auth and RLS.
 
 `NODE_ENV`, `HOSTNAME`, and `PORT` are already defined in `docker-compose.yml`. Do not copy the service-role key, database credentials, Postmark credentials, Supabase management access token, or AI credentials into the website service.
 
@@ -69,6 +69,9 @@ Use the same public values as `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABA
    /terms
    /api/health
    ```
+6. Open `/app`. A signed-out request must return to `/auth`, while a valid web session proceeds to browser PIN setup/unlock and the private app shell.
+
+The first-party Card Nest callback prevents email confirmation/recovery users from being shown a Supabase-hosted callback page. Google OAuth must still visit Google and Supabase unless a Supabase custom domain is configured; do not represent that provider-controlled redirect as a same-origin request.
 
 ## Automatic deployments
 

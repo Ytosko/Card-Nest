@@ -26,15 +26,7 @@ for (const fn of functions) {
   }
 }
 
-// Set Edge Function server secrets
-try {
-  console.log('Setting Edge Function secrets...');
-  const secretKey = process.env.AI_CREDENTIAL_ENCRYPTION_KEY || 'cardnest_master_ai_credential_secret_key_v1_32bytes!!';
-  const output = execSync(`npx supabase secrets set AI_CREDENTIAL_ENCRYPTION_KEY="${secretKey}" --project-ref ${projectRef}`, {
-    env: { ...process.env, SUPABASE_ACCESS_TOKEN: accessToken },
-    encoding: 'utf-8',
-  });
-  console.log('Secrets set output:\n', output);
-} catch (error) {
-  console.error('Secrets error output:\n', error.stdout || error.stderr || error.message);
-}
+// The encryption key is managed separately as a hosted Supabase secret. Never
+// synthesize a fallback here: replacing it would make existing credentials
+// undecryptable, and a committed fallback would not be a secret.
+console.log('Edge Function deployment complete. Existing hosted secrets were not changed.');

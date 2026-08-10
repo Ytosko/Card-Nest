@@ -12,7 +12,7 @@ The repository root is the Expo SDK 54 application for Android, iOS, Expo Go, an
 
 ### Production website
 
-`web/` is the standalone production website deployed at [cardnest.ytosko.dev](https://cardnest.ytosko.dev). It provides the landing page, Supabase Auth callback, privacy policy, terms, and health endpoint.
+`web/` is the standalone production website and authenticated Card Nest web application deployed at [cardnest.ytosko.dev](https://cardnest.ytosko.dev). It serves the public landing/legal pages plus `/app`, browser auth, shared contacts, capture, AI settings, exports, and the installable PWA shell.
 
 ### Hosted Supabase backend
 
@@ -36,7 +36,8 @@ The Card Nest v1 implementation now includes:
 - animated reduced-motion-aware launch, onboarding, five-tab dashboard, profile photos, and settings
 - card CRUD, full-text search, filters, favorites, tags, private-image restore, duplicate merge/keep-separate, copy/share/call/email actions
 - front/back camera or gallery capture, compression, durable SQLite queue, reconnect/restart recovery, private Storage upload, and retry status
-- device-only OpenAI/Gemini keys, dynamic provider model discovery, schema-validated multimodal extraction, and editable review
+- encrypted OpenAI/Gemini BYOK credentials, dynamic provider model discovery, schema-validated multimodal extraction, and editable review across mobile and web
+- authenticated desktop/mobile-responsive web app with browser-specific PIN lock, shared contacts, live camera/upload/paste capture, bulk actions, vCard/CSV export, and a privacy-safe PWA shell
 - single and selected bulk native Contacts export
 - user profile provisioning, private avatars, and server-side account deletion protected by owner RLS
 - unit, type, lint, remote schema, and Storage checks
@@ -90,7 +91,9 @@ The development site is available at `http://localhost:3000`. Validate the produ
 npm run web:check
 ```
 
-The website requires `SUPABASE_URL` and `SUPABASE_ANON_KEY` at runtime for its server-side email-verification bridge. These are public client credentials, not administrative secrets. Local Compose automatically falls back to the matching `EXPO_PUBLIC_SUPABASE_*` values in the ignored root `.env`.
+The website requires `SUPABASE_URL` and `SUPABASE_ANON_KEY` at runtime. Supabase access is performed through server-rendered routes/actions and secure cookies, so normal web UI and API calls stay on the Card Nest origin. These are public client credentials, not administrative secrets; RLS remains the authorization boundary. Local Compose automatically falls back to the matching `EXPO_PUBLIC_SUPABASE_*` values in the ignored root `.env`.
+
+See [the web application guide](docs/WEB_APP.md) for routes, browser PIN security, AI credential boundaries, capture, exports, and PWA behavior.
 
 ## Docker deployment
 
@@ -154,7 +157,7 @@ npm run assets:brand
 
 - `.env` and local Supabase state are ignored by Git.
 - Server/admin credentials are tooling-only and never imported by Expo code.
-- User OpenAI/Gemini API keys are stored only in Expo SecureStore and never synchronized.
+- User OpenAI/Gemini API keys are encrypted by a Supabase Edge Function and decrypted only in trusted extraction/model-discovery memory. Plaintext keys are never returned to browser JavaScript.
 - The mobile app uses a public Supabase key; authorization is enforced with RLS.
 - Original card images are private and stored under owner-prefixed object paths.
 

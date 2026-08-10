@@ -15,10 +15,22 @@ function json(body: Record<string, unknown>, status = 200) {
 
 // Master encryption key derived from environment secret
 async function getEncryptionKey(): Promise<CryptoKey> {
-  const secret = Deno.env.get('AI_CREDENTIAL_ENCRYPTION_KEY') || 'cardnest_master_ai_credential_secret_key_v1_32bytes!!';
+  const secret = Deno.env.get('AI_CREDENTIAL_ENCRYPTION_KEY');
+  if (!secret || secret.length < 32) throw new Error('AI credential encryption is not configured.');
   const encoder = new TextEncoder();
   const keyData = encoder.encode(secret.padEnd(32, '!').slice(0, 32));
   return crypto.subtle.importKey('raw', keyData, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+}
+
+async function decryptApiKey(ciphertextB64: string, ivB64: string, authTagB64: string): Promise<string> {
+  const key = await getEncryptionKey();
+  const ciphertext = Uint8Array.from(atob(ciphertextB64), (char) => char.charCodeAt(0));
+  const iv = Uint8Array.from(atob(ivB64), (char) => char.charCodeAt(0));
+  const authTag = Uint8Array.from(atob(authTagB64), (char) => char.charCodeAt(0));
+  const combined = new Uint8Array(ciphertext.length + authTag.length);
+  combined.set(ciphertext); combined.set(authTag, ciphertext.length);
+  const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, combined);
+  return new TextDecoder().decode(decrypted);
 }
 
 // AES-256-GCM Encryption
@@ -77,6 +89,41 @@ Deno.serve(async (request) => {
 
   // GET: Fetch credential metadata status
   if (request.method === 'GET') {
+    if (action === 'models') {
+      const provider = url.searchParams.get('provider');
+      if (!provider || !['openai', 'gemini'].includes(provider)) return json({ error: 'Invalid provider.' }, 400);
+      const { data: credential, error: credentialError } = await adminClient
+        .from('user_ai_credentials')
+        .select('encrypted_key, iv, auth_tag')
+        .eq('user_id', userId)
+        .eq('provider', provider)
+        .maybeSingle();
+      if (credentialError || !credential) return json({ error: `Configure a ${provider} key before loading models.` }, 400);
+      let decryptedKey: string | null = null;
+      try {
+        decryptedKey = await decryptApiKey(credential.encrypted_key, credential.iv, credential.auth_tag);
+        if (provider === 'openai') {
+          const response = await fetch('https://api.openai.com/v1/models', { headers: { Authorization: `Bearer ${decryptedKey}` } });
+          if (!response.ok) return json({ error: 'OpenAI model discovery failed.' }, 400);
+          const body = await response.json();
+          const models = (body.data || []).map((model: { id?: string }) => model.id).filter(Boolean).sort();
+          return json({ ok: true, models });
+        }
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(decryptedKey)}`);
+        if (!response.ok) return json({ error: 'Gemini model discovery failed.' }, 400);
+        const body = await response.json();
+        const models = (body.models || [])
+          .filter((model: { supportedGenerationMethods?: string[] }) => model.supportedGenerationMethods?.includes('generateContent'))
+          .map((model: { name?: string }) => model.name)
+          .filter(Boolean)
+          .sort();
+        return json({ ok: true, models });
+      } catch {
+        return json({ error: 'Encrypted provider credential could not be used. Save the key again.' }, 400);
+      } finally {
+        decryptedKey = null;
+      }
+    }
     const { data: rows, error: fetchError } = await adminClient
       .from('user_ai_credentials')
       .select('provider, key_suffix, updated_at')

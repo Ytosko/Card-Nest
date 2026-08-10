@@ -1,0 +1,4 @@
+import { AiSettings } from '@/components/ai-settings';
+import { requireWebUser } from '@/lib/supabase/server';
+
+export default async function AiSettingsPage() { const { supabase, user } = await requireWebUser(); const { data } = await supabase.from('user_preferences').select('selected_ai_provider,selected_ai_model').eq('user_id', user!.id).maybeSingle(); const provider = data?.selected_ai_provider === 'openai' ? 'openai' : 'gemini'; return <section className="workspace-page narrow-page"><header className="workspace-header"><div><p className="eyebrow">BYOK EXTRACTION</p><h1>AI provider</h1><p className="muted">Your API key is encrypted at rest and the decrypted value never enters browser JavaScript.</p></div></header><AiSettings initialModel={data?.selected_ai_model ?? ''} initialProvider={provider} /></section>; }

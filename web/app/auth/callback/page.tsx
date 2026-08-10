@@ -1,136 +1,60 @@
-'use client';
-
+import type { EmailOtpType } from '@supabase/supabase-js';
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
 
-type CallbackState = 'checking' | 'success' | 'error';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 
-type VerificationResponse =
-  | {
-      ok: true;
-      flowType: string;
-      session: { accessToken: string; refreshToken: string } | null;
-    }
-  | { ok: false; message: string };
+export const dynamic = 'force-dynamic';
 
-const flowMessages: Record<string, string> = {
-  email: 'Your email address is verified.',
-  email_change: 'Your new email address is verified.',
-  invite: 'Your invitation is accepted.',
-  magiclink: 'Your secure sign-in link is verified.',
-  recovery: 'Your password reset link is verified.',
-  signup: 'Your Card Nest account is verified.',
-};
+type Params = Promise<Record<string, string | string[] | undefined>>;
 
-function createAppLink(response: Extract<VerificationResponse, { ok: true }>) {
-  if (!response.session) return 'cardnest://';
+const allowedOtpTypes = new Set<EmailOtpType>(['email', 'email_change', 'invite', 'magiclink', 'recovery', 'signup']);
 
-  const fragment = new URLSearchParams({
-    access_token: response.session.accessToken,
-    refresh_token: response.session.refreshToken,
-    type: response.flowType,
-  });
-
-  return `cardnest://auth/callback#${fragment.toString()}`;
+function first(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
 }
 
-export default function AuthCallbackPage() {
-  const [state, setState] = useState<CallbackState>('checking');
-  const [message, setMessage] = useState('Checking your secure Card Nest link…');
-  const [appLink, setAppLink] = useState('cardnest://');
+function safeMessage(value: string | undefined) {
+  return value?.replace(/\+/gu, ' ').slice(0, 260);
+}
 
-  useEffect(() => {
-    const controller = new AbortController();
-    let openTimer: number | undefined;
+export default async function AuthCallbackPage({ searchParams }: { searchParams: Params }) {
+  const params = await searchParams;
+  const suppliedError = safeMessage(first(params.error_description) ?? first(params.error));
+  const code = first(params.code);
+  const tokenHash = first(params.token_hash);
+  const rawType = first(params.type);
+  const pinResetNonce = first(params.pin_reset_nonce);
+  const supabase = await createServerSupabaseClient();
+  let errorMessage = suppliedError;
+  const flowType = rawType ?? 'signin';
 
-    async function verifyLink() {
-      const search = new URLSearchParams(window.location.search);
-      const hash = new URLSearchParams(window.location.hash.replace(/^#/u, ''));
-      // One-time hashes, session fragments, and provider errors are never kept
-      // in browser history, including when the incoming link is malformed.
-      window.history.replaceState({}, '', '/auth/callback');
-      const suppliedError =
-        search.get('error_description') ??
-        search.get('error') ??
-        hash.get('error_description') ??
-        hash.get('error');
+  if (!errorMessage && code) {
+    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    if (error) errorMessage = 'This sign-in link expired or has already been used. Start again from Card Nest.';
+  } else if (!errorMessage && tokenHash && rawType && allowedOtpTypes.has(rawType as EmailOtpType)) {
+    const { error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type: rawType as EmailOtpType });
+    if (error) errorMessage = 'This secure email link expired or has already been used. Request a fresh link and try again.';
+  } else if (!errorMessage) {
+    errorMessage = 'This secure link is incomplete. Start the sign-in or recovery flow again.';
+  }
 
-      if (suppliedError) {
-        await Promise.resolve();
-        setState('error');
-        setMessage(suppliedError.replace(/\+/gu, ' '));
-        return;
-      }
+  const { data } = errorMessage ? { data: { session: null } } : await supabase.auth.getSession();
+  const session = data.session;
+  const appLink = session
+    ? `cardnest://auth/callback#${new URLSearchParams({ access_token: session.access_token, refresh_token: session.refresh_token, type: flowType }).toString()}`
+    : 'cardnest://';
+  const safePinResetNonce = pinResetNonce && /^[A-Za-z0-9_-]{40,64}$/u.test(pinResetNonce) ? pinResetNonce : null;
+  const webTarget = safePinResetNonce && session ? `/app/reset-pin?nonce=${encodeURIComponent(safePinResetNonce)}` : flowType === 'recovery' ? '/auth/reset-password' : '/app';
 
-      const tokenHash = search.get('token_hash');
-      const type = search.get('type');
-      if (!tokenHash || !type) {
-        await Promise.resolve();
-        setState('error');
-        setMessage('This secure link is incomplete. Request a new email and try again.');
-        return;
-      }
-
-      try {
-        const verification = await fetch('/api/auth/verify', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tokenHash, type }),
-          cache: 'no-store',
-          signal: controller.signal,
-        });
-        const response = (await verification.json()) as VerificationResponse;
-
-        if (!verification.ok || !response.ok) {
-          throw new Error(response.ok ? 'This link could not be verified.' : response.message);
-        }
-
-        const nextAppLink = createAppLink(response);
-        setAppLink(nextAppLink);
-        setState('success');
-        setMessage(`${flowMessages[response.flowType] ?? 'Your secure link is verified.'} Opening the Card Nest app…`);
-        openTimer = window.setTimeout(() => window.location.assign(nextAppLink), 650);
-      } catch (error) {
-        if (controller.signal.aborted) return;
-        setState('error');
-        setMessage(error instanceof Error ? error.message : 'Card Nest could not verify this link. Please request a new one.');
-      }
-    }
-
-    void verifyLink();
-
-    return () => {
-      controller.abort();
-      if (openTimer) window.clearTimeout(openTimer);
-    };
-  }, []);
-
-  return (
-    <section className="container grid min-h-[60vh] place-items-center px-4 py-8 sm:min-h-[68vh] sm:py-16">
-      <div className="card-shadow w-full max-w-xl rounded-[2rem] border border-[#dbe8eb] bg-white p-6 text-center sm:p-10 md:p-12">
-        <div
-          aria-hidden
-          className={`mx-auto grid h-16 w-16 place-items-center rounded-full text-3xl font-black ${
-            state === 'error' ? 'bg-[#fce4e8] text-[#c73a4a]' : 'bg-[#dff8fc] text-[#067a90]'
-          }`}>
-          {state === 'checking' ? '…' : state === 'error' ? '!' : '✓'}
-        </div>
-        <p className="mt-6 text-xs font-bold tracking-[0.12em] text-[#079cb8] sm:mt-7 sm:text-sm">SECURE AUTH CALLBACK</p>
-        <h1 className="mt-2 text-2xl font-bold tracking-[-0.04em] sm:mt-3 sm:text-3xl">
-          {state === 'error' ? 'This link could not be verified' : state === 'checking' ? 'Verifying your link' : 'You’re verified'}
-        </h1>
-        <p aria-live="polite" className="mt-4 text-base leading-7 text-[#60767c] sm:mt-5">{message}</p>
-        <div className="mt-7 flex flex-col gap-3 sm:mt-8 sm:flex-row sm:justify-center">
-          {state === 'success' ? (
-            <a className="focus-ring inline-flex min-h-12 items-center justify-center rounded-xl bg-[#079cb8] px-6 font-bold text-white transition hover:bg-[#067a90] active:scale-98" href={appLink}>
-              Open Card Nest
-            </a>
-          ) : null}
-          <Link className="focus-ring inline-flex min-h-12 items-center justify-center rounded-xl border border-[#bfd5da] px-6 font-bold text-[#334a50] transition hover:border-[#0CC0DF] hover:text-[#067a90]" href="/">
-            Return home
-          </Link>
-        </div>
-      </div>
-    </section>
-  );
+  return <main className="center-page"><section className="auth-card compact-card callback-card">
+    <div className={`status-mark ${errorMessage ? 'error' : ''}`} aria-hidden>{errorMessage ? '!' : '✓'}</div>
+    <p className="eyebrow">SECURE CARD NEST CALLBACK</p>
+    <h1>{errorMessage ? 'This link could not be verified' : flowType === 'recovery' ? 'Reset link verified' : 'You’re verified'}</h1>
+    <p className="muted" role={errorMessage ? 'alert' : 'status'}>{errorMessage ?? (flowType === 'recovery' ? 'Continue in this browser to choose a new password, or open the mobile app.' : 'Your Card Nest session is ready. Choose where to continue.')}</p>
+    <div className="button-row">
+      {!errorMessage ? <Link className="button button-primary" href={webTarget}>{flowType === 'recovery' ? 'Reset password on web' : 'Continue to web app'}</Link> : null}
+      {!errorMessage ? <a className="button button-secondary" href={appLink}>Open mobile app</a> : null}
+      {errorMessage ? <Link className="button button-primary" href="/auth?mode=signin">Return to login</Link> : null}
+    </div>
+  </section></main>;
 }
