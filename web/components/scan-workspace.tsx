@@ -101,13 +101,10 @@ export function ScanWorkspace() {
       const data = await response.json(); if (!response.ok || !data.ok) throw new Error(data.message ?? 'AI extraction failed.');
       const classification = data.result?.documentClassification;
       if (classification?.result === 'NOT_A_CARD') {
-        setMessage("This doesn't look like a contact card. We couldn't find enough contact information in this image.");
+        setMessage("This doesn't look like a contact card. We couldn't find useful contact or business information in this image.");
         setResult(null);
         setMeta({});
         return;
-      }
-      if (classification?.result === 'UNCERTAIN_CARD') {
-        setMessage("Not sure this is a contact card. We found some contact information, but this image doesn't clearly look like a business or contact card.");
       }
       setResult(data.result); setMeta({ provider: data.provider, model: data.model });
     } catch (error) { setMessage(error instanceof Error ? error.message : 'AI extraction failed.'); }

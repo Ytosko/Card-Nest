@@ -146,12 +146,12 @@ export async function runConfiguredExtraction(cardId: string, userId: string, im
       extraction_quality: {
         reviewed: false,
         failed: false,
-        needsReview: isUncertain,
+        needsReview: false,
         documentClassification: classification,
         source_count: imageUris.length,
       },
-      // Uncertain extractions require user confirmation/review; Valid extractions save as ready.
-      status: (isUncertain ? 'review' : 'ready') as 'review' | 'ready',
+      // Both VALID_CARD and UNCERTAIN_CARD auto-process directly into ready contacts.
+      status: 'ready' as const,
     };
 
     if (__DEV__) {
@@ -249,7 +249,7 @@ export async function runConfiguredExtraction(cardId: string, userId: string, im
     await supabase
       .from('processing_jobs')
       .update({
-        status: isUncertain ? 'needs_review' : 'synced',
+        status: 'synced',
         completed_at: new Date().toISOString(),
         result: { confidence: extracted.confidence, documentClassification: classification },
       })
@@ -261,7 +261,7 @@ export async function runConfiguredExtraction(cardId: string, userId: string, im
 
     return {
       success: true,
-      needsReview: isUncertain,
+      needsReview: false,
       classification,
     };
   } catch (error) {

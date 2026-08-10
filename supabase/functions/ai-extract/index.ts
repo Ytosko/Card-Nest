@@ -169,14 +169,14 @@ Read both front and back images together as one complete contact record.
 NEVER invent or hallucinate missing details. Return empty strings or empty arrays for missing fields.
 
 Document Classification Rules:
-First, assess whether the image(s) contain plausible contact details intended for a contact library (traditional business card, visiting card, digital contact card, QR contact card, handwritten contact note, personal contact details, etc.).
+First, assess whether the image(s) contain plausible contact or business details intended for a contact library (traditional business card, visiting card, digital contact card, QR contact card, handwritten contact note, personal/professional contact details, WhatsApp/bKash/IMO contact details, etc.).
 
 Set documentClassification:
-1. result: "VALID_CARD" when the image clearly contains useful contact identity/information (e.g. person's name + phone/email, company + contact details, QR code encoding contact info, recognizable visiting card, handwritten contact note with clear name/phone).
-2. result: "UNCERTAIN_CARD" when plausible contact details exist but the evidence is low or unconventional (e.g. name + phone only, cropped/partially obscured card, blurry image where some info is readable, digital contact screenshot). BE CONSERVATIVE: if ANY plausible contact info exists, prefer UNCERTAIN_CARD over NOT_A_CARD!
-3. result: "NOT_A_CARD" ONLY when there is strong evidence the image contains NO meaningful contact info (e.g. food, landscape, scenery, selfie with no contact text, meme, blank image, random receipt/invoice).
+1. result: "VALID_CARD" when the image clearly contains useful contact identity or business information (e.g. person's name + phone/email, company + contact details, QR code encoding contact info, recognizable visiting card, handwritten contact note with clear details).
+2. result: "UNCERTAIN_CARD" when any plausible useful contact or business details exist even if minimal, unconventional, cropped, blurry, digital screenshot, or handwritten (e.g. name + phone only, name + email, company + website, cropped card, digital contact screenshot). PREFER UNCERTAIN_CARD whenever any plausible useful contact/business data exists!
+3. result: "NOT_A_CARD" ONLY when NO meaningful contact or business information can reasonably be extracted from the image(s) (e.g. food, landscape, scenery, selfie/pet photo with no contact text, meme, blank image, unrelated receipt/document).
 4. confidence: a number between 0.0 and 1.0 representing classification confidence.
-5. reason: a short explanation suitable for diagnostics (e.g. "Valid business card with name and phone", "Handwritten note with name and email", "Scenery photo with no text").
+5. reason: a short explanation suitable for diagnostics (e.g. "Valid business card", "Handwritten note with phone", "Scenery photo with no contact text").
 
 Multilingual & Field extraction rules:
 1. For names, company names, titles, and address fields: if an official English/Latin translation or printed version exists on the card, extract or normalize it into clear English/Latin text; otherwise, produce a clean, readable transliteration into Latin script rather than inventing a translation. Do NOT translate proper names into generic dictionary words.

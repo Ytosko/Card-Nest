@@ -22,13 +22,11 @@ export default function CaptureSavedScreen() {
   const isProcessing = state === 'processing' || state === 'validating';
   const isSynced = state === 'synced';
   const isFailed = state === 'failed';
-  const isNeedsReview = state === 'needs_review';
   const isNotCard = state === 'not_a_card';
 
   // Progression steps copy
   const getStatusTitle = () => {
     if (isNotCard) return "This doesn't look like a contact card";
-    if (isNeedsReview) return 'Not sure this is a contact card';
     if (isQueued) return 'Saving card…';
     if (isUploading) return 'Uploading securely…';
     if (isProcessing) return 'Reading your card…';
@@ -37,8 +35,7 @@ export default function CaptureSavedScreen() {
   };
 
   const getStatusBody = () => {
-    if (isNotCard) return "We couldn't find enough contact information in this image.";
-    if (isNeedsReview) return "We found some contact information, but this image doesn't clearly look like a business or contact card.";
+    if (isNotCard) return "We couldn't find useful contact or business information in this image.";
     if (isQueued) return 'Securing photos in your local queue.';
     if (isUploading) return 'Sending encrypted images to Card Nest servers.';
     if (isProcessing) return 'AI is classifying and organizing contact details.';
@@ -61,7 +58,7 @@ export default function CaptureSavedScreen() {
           {
             backgroundColor: isNotCard
               ? theme.colors.dangerSoft
-              : isNeedsReview || isFailed
+              : isFailed
               ? theme.colors.warningSoft
               : isSynced
               ? theme.colors.successSoft
@@ -75,15 +72,13 @@ export default function CaptureSavedScreen() {
             color={
               isNotCard
                 ? theme.colors.danger
-                : isNeedsReview || isFailed
+                : isFailed
                 ? theme.colors.warning
                 : theme.colors.success
             }
             name={
               isNotCard
                 ? 'file-cancel-outline'
-                : isNeedsReview
-                ? 'file-question-outline'
                 : isFailed
                 ? 'cloud-alert-outline'
                 : 'cloud-check-outline'
@@ -103,7 +98,7 @@ export default function CaptureSavedScreen() {
       </View>
 
       {/* Progress Steps Indicator */}
-      {!isSynced && !isFailed && !isNeedsReview && !isNotCard ? (
+      {!isSynced && !isFailed && !isNotCard ? (
         <View
           style={[
             styles.stepsContainer,
@@ -119,12 +114,6 @@ export default function CaptureSavedScreen() {
         {isSynced || (!item && !isNotCard) ? (
           <AppButton onPress={() => router.replace({ pathname: '/(app)/cards/[id]', params: { id } })}>
             View contact
-          </AppButton>
-        ) : null}
-
-        {isNeedsReview ? (
-          <AppButton onPress={() => router.replace({ pathname: '/(app)/cards/[id]', params: { id } })}>
-            Review anyway
           </AppButton>
         ) : null}
 
@@ -147,12 +136,12 @@ export default function CaptureSavedScreen() {
           <>
             <AppButton
               onPress={() => router.replace('/(app)/(tabs)')}
-              variant={isSynced || isFailed || isNeedsReview ? 'secondary' : 'primary'}>
+              variant={isSynced || isFailed ? 'secondary' : 'primary'}>
               Go to contacts
             </AppButton>
             
             <AppButton onPress={() => router.replace('/(app)/(tabs)/scan')} variant="secondary">
-              {isNeedsReview ? 'Try another photo' : 'Scan another card'}
+              Scan another card
             </AppButton>
           </>
         )}

@@ -210,16 +210,6 @@ export function CaptureQueueProvider({ children }: PropsWithChildren) {
           return false;
         }
 
-        if (runResult.needsReview) {
-          // Held for user confirmation / review
-          await updateQueueItem(item.id, 'needs_review', {
-            attemptCount: attempt,
-            lastError: runResult.classification?.reason || 'We found some contact info, but this image does not clearly look like a contact card.',
-            nextRetryAt: null,
-          });
-          return true;
-        }
-
         if (runResult.success) {
           await updateQueueItem(item.id, 'synced', { attemptCount: attempt, lastError: null, nextRetryAt: null });
           return true;
