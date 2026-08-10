@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as IntentLauncher from 'expo-intent-launcher';
 
 import {
   getCurrentVersionInfo,
+  downloadAndInstallApk,
   isNewerVersion,
   parseSemVer,
   parseVersionCodeFromRelease,
@@ -34,6 +37,10 @@ vi.mock('expo-file-system/legacy', () => ({
 
 vi.mock('expo-intent-launcher', () => ({
   startActivityAsync: vi.fn(),
+}));
+
+vi.mock('react-native', () => ({
+  Platform: { OS: 'android' },
 }));
 
 describe('Update Service', () => {
@@ -70,5 +77,32 @@ describe('Update Service', () => {
     const current = { versionName: '0.1.5-alpha-e4f81', versionCode: 7 };
     const isNewer = isNewerVersion(current, 'v0.1.5-alpha-e4f81', 'Release notes with versionCode: 7');
     expect(isNewer).toBe(false);
+  });
+
+  it('downloads an APK through the SDK 54 legacy compatibility API and opens the installer', async () => {
+    const progress = vi.fn();
+    vi.mocked(FileSystem.createDownloadResumable).mockImplementation(
+      (_url, _targetPath, _options, callback) =>
+        ({
+          downloadAsync: vi.fn(async () => {
+            callback?.({ totalBytesWritten: 50, totalBytesExpectedToWrite: 100 });
+            return { uri: 'file:///app-docs/CardNest-update.apk', status: 200, headers: {}, mimeType: null };
+          }),
+        }) as unknown as ReturnType<typeof FileSystem.createDownloadResumable>,
+    );
+    vi.mocked(FileSystem.getContentUriAsync).mockResolvedValue('content://cardnest/update.apk');
+    vi.mocked(IntentLauncher.startActivityAsync).mockResolvedValue({ resultCode: 0 });
+
+    const result = await downloadAndInstallApk('https://example.com/Card-Nest.apk', progress);
+
+    expect(result).toEqual({ success: true });
+    expect(progress).toHaveBeenCalledWith(50);
+    expect(IntentLauncher.startActivityAsync).toHaveBeenCalledWith(
+      'android.intent.action.VIEW',
+      expect.objectContaining({
+        data: 'content://cardnest/update.apk',
+        type: 'application/vnd.android.package-archive',
+      }),
+    );
   });
 });

@@ -1,11 +1,12 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { useRouter } from 'expo-router';
+import { Redirect, useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Alert, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppButton } from '@/src/components/ui/app-button';
 import { AppText } from '@/src/components/ui/app-text';
+import { PASSKEY_ENABLED } from '@/src/features/auth/auth-flags';
 import { registerPasskey } from '@/src/features/auth/passkey-service';
 import { authStorage } from '@/src/lib/supabase/auth-storage';
 import { useAppTheme } from '@/src/theme/theme-provider';
@@ -14,6 +15,10 @@ export default function PasskeySetupScreen() {
   const theme = useAppTheme();
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+
+  if (!PASSKEY_ENABLED) {
+    return <Redirect href="/(app)/settings/security" />;
+  }
 
   async function handleCreatePasskey() {
     setLoading(true);

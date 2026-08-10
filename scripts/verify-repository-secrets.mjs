@@ -14,6 +14,8 @@ const sensitiveNames = new Set([
   'GEMINI_API_KEY',
   'GOOGLE_API_KEY',
   'ANTHROPIC_API_KEY',
+  'MYAPP_RELEASE_STORE_PASSWORD',
+  'MYAPP_RELEASE_KEY_PASSWORD',
 ]);
 
 function parseEnv(source) {
@@ -84,6 +86,7 @@ const credentialPatterns = [
   ['Google API key pattern', /\bAIza[A-Za-z0-9_-]{30,}\b/u],
   ['Supabase access token pattern', /\bsbp_[A-Za-z0-9_-]{20,}\b/u],
   ['Private key material', /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/u],
+  ['Gradle signing password literal', /\b(?:storePassword|keyPassword)\s+['"][^'"]{8,}['"]/u],
 ];
 
 const historicalPatterns = [

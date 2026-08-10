@@ -1,6 +1,11 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 
+import { useAuth } from '@/src/features/auth/auth-provider';
+import { PASSKEY_ENABLED } from '@/src/features/auth/auth-flags';
+
+import { shouldRequestAutomaticBiometric } from './security-coordinator';
+
 import {
   authenticateWithBiometrics,
   getAutoLockTimeout,
@@ -8,6 +13,7 @@ import {
   isBiometricActive,
   isBiometricEnabled,
   logLockDiagnostic,
+  setUnlockMethod,
   type AutoLockTimeout,
   type UnlockMethod,
 } from './security-storage';
@@ -62,6 +68,7 @@ function getTimeoutMs(timeout: AutoLockTimeout): number {
 }
 
 export function SecurityProvider({ children }: { children: React.ReactNode }) {
+  const { initialized: authInitialized, session } = useAuth();
   const [initialized, setInitialized] = useState(false);
   const [unlockMethod, setUnlockMethodState] = useState<UnlockMethod>(null);
   const [lockState, setLockState] = useState<LockState>('LOCKED');
@@ -72,28 +79,46 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
   const backgroundTimeRef = useRef<number | null>(null);
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   const isBiometricOverlayActiveRef = useRef<boolean>(false);
+  const automaticBiometricAttemptConsumedRef = useRef(false);
+  const biometricPromptPromiseRef = useRef<Promise<boolean> | null>(null);
+  const lockStateRef = useRef<LockState>('LOCKED');
+
+  const updateLockState = useCallback((nextState: LockState) => {
+    lockStateRef.current = nextState;
+    setLockState(nextState);
+  }, []);
 
   const refreshSecurityState = useCallback(async () => {
     try {
-      const method = await getUnlockMethod();
+      let method = await getUnlockMethod();
       const timeout = await getAutoLockTimeout();
-      const bioEnabled = await isBiometricEnabled();
+      let bioEnabled = await isBiometricEnabled();
+
+      // A previous experimental build could persist passkey as the local unlock
+      // method. While the feature flag is off, return those users to mandatory
+      // PIN setup instead of exposing or attempting the unreliable passkey flow.
+      if (method === 'passkey' && !PASSKEY_ENABLED) {
+        await setUnlockMethod(null);
+        method = null;
+        bioEnabled = false;
+      }
 
       setUnlockMethodState(method);
       setAutoLockTimeoutState(timeout);
       setBiometricEnabledState(bioEnabled);
 
       if (!method) {
-        setLockState('UNCONFIGURED');
-      } else if (lockState === 'UNCONFIGURED') {
-        setLockState('LOCKED');
+        updateLockState('UNCONFIGURED');
+      } else if (lockStateRef.current === 'UNCONFIGURED') {
+        automaticBiometricAttemptConsumedRef.current = false;
+        updateLockState('LOCKED');
       }
     } catch {
       // Graceful fallback
     } finally {
       setInitialized(true);
     }
-  }, [lockState]);
+  }, [updateLockState]);
 
   useEffect(() => {
     void refreshSecurityState();
@@ -128,7 +153,8 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
         const maxAllowed = getTimeoutMs(autoLockTimeout);
         if (elapsed >= maxAllowed) {
           logLockDiagnostic('relock_triggered', { elapsed, maxAllowed });
-          setLockState('LOCKED');
+          automaticBiometricAttemptConsumedRef.current = false;
+          updateLockState('LOCKED');
         }
         backgroundTimeRef.current = null;
       }
@@ -139,46 +165,75 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     return () => {
       subscription.remove();
     };
-  }, [autoLockTimeout, unlockMethod]);
+  }, [autoLockTimeout, unlockMethod, updateLockState]);
 
   const unlock = useCallback(() => {
     logLockDiagnostic('unlock_state_changed', { isUnlocked: true });
-    setLockState('UNLOCKED');
-  }, []);
+    automaticBiometricAttemptConsumedRef.current = true;
+    updateLockState('UNLOCKED');
+  }, [updateLockState]);
 
   const lock = useCallback(() => {
     logLockDiagnostic('unlock_state_changed', { isUnlocked: false });
-    setLockState('LOCKED');
-  }, []);
+    automaticBiometricAttemptConsumedRef.current = false;
+    updateLockState('LOCKED');
+  }, [updateLockState]);
 
   const triggerBiometricUnlock = useCallback(async (source = 'unknown'): Promise<boolean> => {
-    if (lockState === 'UNLOCKED') {
+    if (lockStateRef.current === 'UNLOCKED') {
       console.log(`[BIOMETRIC_SKIPPED state=UNLOCKED reason=already_unlocked source=${source}]`);
       return true;
     }
 
-    if (isBiometricOverlayActiveRef.current) {
+    if (biometricPromptPromiseRef.current) {
       console.log(`[BIOMETRIC_SKIPPED state=AUTHENTICATING reason=already_in_progress source=${source}]`);
-      return false;
+      return biometricPromptPromiseRef.current;
     }
 
-    setLockState('AUTHENTICATING');
+    updateLockState('AUTHENTICATING');
     isBiometricOverlayActiveRef.current = true;
-
-    try {
-      const success = await authenticateWithBiometrics(source);
-      if (success) {
-        setLockState('UNLOCKED');
-        return true;
-      } else {
-        setLockState('LOCKED');
+    const promptPromise = (async () => {
+      try {
+        const success = await authenticateWithBiometrics(source);
+        updateLockState(success ? 'UNLOCKED' : 'LOCKED');
+        return success;
+      } catch {
+        updateLockState('LOCKED');
         return false;
+      } finally {
+        biometricPromptPromiseRef.current = null;
       }
-    } catch {
-      setLockState('LOCKED');
-      return false;
-    }
-  }, [lockState]);
+    })();
+    biometricPromptPromiseRef.current = promptPromise;
+    return promptPromise;
+  }, [updateLockState]);
+
+  // Automatic biometric prompting belongs to the security coordinator, not a
+  // screen. One lock lifecycle consumes at most one automatic attempt, so a
+  // cancellation cannot immediately reopen the OS prompt after LOCKED resumes.
+  useEffect(() => {
+    const shouldPrompt = shouldRequestAutomaticBiometric({
+      authInitialized,
+      hasSession: Boolean(session),
+      securityInitialized: initialized,
+      unlockMethod,
+      biometricEnabled,
+      lockState,
+      attemptConsumed: automaticBiometricAttemptConsumedRef.current,
+    });
+    if (!shouldPrompt) return;
+
+    automaticBiometricAttemptConsumedRef.current = true;
+    void triggerBiometricUnlock('security_coordinator_auto');
+  }, [
+    authInitialized,
+    biometricEnabled,
+    initialized,
+    lockState,
+    session,
+    triggerBiometricUnlock,
+    unlockMethod,
+  ]);
 
   const isUnlocked = lockState === 'UNCONFIGURED' || lockState === 'UNLOCKED';
 

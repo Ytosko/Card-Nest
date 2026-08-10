@@ -64,14 +64,7 @@ export default function AppUnlockScreen() {
   }, [lockoutTimer]);
 
   useEffect(() => {
-    if (biometricEnabled && unlockMethod === 'pin' && lockState === 'LOCKED') {
-      void (async () => {
-        const success = await triggerBiometricUnlock('app_unlock_screen');
-        if (success) {
-          await handleSuccessfulUnlock();
-        }
-      })();
-    } else if (unlockMethod === 'passkey' && lockState === 'LOCKED') {
+    if (unlockMethod === 'passkey' && lockState === 'LOCKED') {
       void (async () => {
         setError(null);
         setLoading(true);
@@ -90,7 +83,13 @@ export default function AppUnlockScreen() {
         }
       })();
     }
-  }, [biometricEnabled, handleSuccessfulUnlock, lockState, triggerBiometricUnlock, unlockMethod]);
+  }, [handleSuccessfulUnlock, lockState, unlockMethod]);
+
+  useEffect(() => {
+    if (unlockMethod === 'pin' && lockState === 'UNLOCKED') {
+      void handleSuccessfulUnlock();
+    }
+  }, [handleSuccessfulUnlock, lockState, unlockMethod]);
 
   async function attemptPasskeyUnlock() {
     setError(null);

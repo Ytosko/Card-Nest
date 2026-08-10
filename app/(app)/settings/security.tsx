@@ -56,7 +56,8 @@ export default function SecuritySettingsScreen() {
   }, []);
 
   useEffect(() => {
-    void fetchPasskeys();
+    if (PASSKEY_ENABLED) void fetchPasskeys();
+    else setLoading(false);
     void (async () => {
       setHasBioHardware(await hasLocalBiometricHardware());
     })();
