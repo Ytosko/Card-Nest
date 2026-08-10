@@ -44,6 +44,7 @@ export default function CardDetailScreen() {
   const card = useCard(id);
   const [images, setImages] = useState<Partial<Record<'front' | 'back', string>>>({});
   const [notice, setNotice] = useState<string | null>(null);
+  const [noticeTone, setNoticeTone] = useState<'info' | 'success'>('success');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -108,9 +109,15 @@ export default function CardDetailScreen() {
     setError(null);
     setNotice(null);
     try {
-      await exportCardToContacts(person);
+      const nativeContactId = await exportCardToContacts(person);
+      if (!nativeContactId) {
+        setNoticeTone('info');
+        setNotice('Contact editor closed without saving.');
+        return;
+      }
       await markCardExported(person.id);
       setInNativeContacts(true);
+      setNoticeTone('success');
       setNotice('Saved to your phone contacts.');
       await card.refetch();
     } catch (reason) {
@@ -276,7 +283,7 @@ export default function CardDetailScreen() {
           ) : null}
         </View>
 
-        {notice ? <AuthNotice message={notice} tone="success" /> : null}
+        {notice ? <AuthNotice message={notice} tone={noticeTone} /> : null}
         {error ? <AuthNotice message={error} /> : null}
         {toastMessage ? <AuthNotice message={toastMessage} tone="success" /> : null}
 

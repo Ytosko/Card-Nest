@@ -11,6 +11,7 @@ import 'react-native-reanimated';
 import { AppProviders } from '@/src/providers/app-providers';
 import { LaunchScreen } from '@/src/components/launch-screen';
 import { useAppTheme } from '@/src/theme/theme-provider';
+import { LaunchUpdateCoordinator } from '@/src/features/updates/components/launch-update-coordinator';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -37,6 +38,7 @@ function RootNavigator() {
   return (
     <ThemeProvider value={navigationTheme}>
       <Stack screenOptions={{ headerShown: false }} />
+      <LaunchUpdateCoordinator />
       <StatusBar style={theme.dark ? 'light' : 'dark'} />
     </ThemeProvider>
   );

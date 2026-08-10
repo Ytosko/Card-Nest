@@ -103,8 +103,8 @@ android {
         applicationId 'dev.ytosko.cardnest'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 11
-        versionName "1.0.2-beta-f0D2X"
+        versionCode 12
+        versionName "1.0.3-beta-f0D3X"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
@@ -126,6 +126,8 @@ android {
     }
     buildTypes {
         debug {
+            // Keep local emulator/dev-client installs alongside the production-signed app.
+            applicationIdSuffix ".dev"
             signingConfig signingConfigs.debug
         }
         release {

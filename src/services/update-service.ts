@@ -1,8 +1,15 @@
+import { bytesToHex } from '@noble/hashes/utils.js';
+import { sha256 } from '@noble/hashes/sha2.js';
 import Constants from 'expo-constants';
-import * as FileSystem from 'expo-file-system/legacy';
+import { fetch as expoFetch } from 'expo/fetch';
+import { Directory, File, Paths } from 'expo-file-system';
 import * as IntentLauncher from 'expo-intent-launcher';
+import { requireOptionalNativeModule } from 'expo-modules-core';
+import * as SecureStore from 'expo-secure-store';
 import * as Updates from 'expo-updates';
 import { Platform } from 'react-native';
+
+export type ReleaseChannel = 'stable' | 'beta' | 'alpha';
 
 export interface VersionInfo {
   versionName: string;
@@ -13,260 +20,576 @@ export interface VersionInfo {
   isEmbeddedLaunch?: boolean;
 }
 
+export interface NativeReleaseAsset {
+  name: string;
+  url: string;
+  size: number;
+  sha256?: string;
+}
+
+export interface NativeRelease {
+  versionName: string;
+  versionCode?: number;
+  tagName: string;
+  releaseNotes: string;
+  publishedAt: string;
+  asset: NativeReleaseAsset;
+}
+
+export interface DownloadedApkMetadata {
+  versionName: string;
+  versionCode?: number;
+  assetName: string;
+  size: number;
+  uri: string;
+  sha256: string;
+  downloadedAt: string;
+}
+
 export interface UpdateCheckResult {
   isUpdateAvailable: boolean;
   isOtaAvailable?: boolean;
   isOtaDownloaded?: boolean;
   isNativeUpdateAvailable?: boolean;
   currentVersion: VersionInfo;
-  latestVersion?: {
-    versionName: string;
-    versionCode?: number;
-    releaseNotes: string;
-    apkUrl?: string;
-    publishedAt: string;
-  };
+  latestVersion?: NativeRelease;
   checkedAt: string;
   error?: string;
 }
 
-const GITHUB_RELEASES_ALL_API = 'https://api.github.com/repos/Ytosko/Card-Nest/releases';
+export type InstallerLaunchResult =
+  | { status: 'launched' }
+  | { status: 'permissionRequired' }
+  | { status: 'error'; error: string };
 
-export function logUpdateDiagnostic(event: string, meta: Record<string, any> = {}) {
+type GithubAsset = {
+  name?: unknown;
+  browser_download_url?: unknown;
+  size?: unknown;
+  digest?: unknown;
+};
+
+type GithubRelease = {
+  tag_name?: unknown;
+  name?: unknown;
+  body?: unknown;
+  published_at?: unknown;
+  draft?: unknown;
+  assets?: unknown;
+};
+
+type NativeIntentLauncherModule = {
+  canRequestPackageInstalls?: () => Promise<boolean>;
+};
+
+const GITHUB_RELEASES_ALL_API = 'https://api.github.com/repos/Ytosko/Card-Nest/releases';
+const OFFICIAL_REPOSITORY_PATH = '/Ytosko/Card-Nest/releases/download/';
+const APK_MIME_TYPE = 'application/vnd.android.package-archive';
+const APK_METADATA_KEY = 'cardnest.native-update.download.v1';
+const APK_DIRECTORY_NAME = 'card-nest-updates';
+const MIN_APK_BYTES = 1024 * 1024;
+const MAX_APK_BYTES = 500 * 1024 * 1024;
+const CHECK_CACHE_MS = 10 * 60 * 1000;
+
+let cachedCheck: UpdateCheckResult | null = null;
+let lastCheckTime = 0;
+let activeDownload: Promise<DownloadedApkMetadata> | null = null;
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message.trim() ? error.message : fallback;
+}
+
+function normalizeVersionName(value: string): string {
+  return value.trim().replace(/^v/u, '');
+}
+
+function isCredibleApkSize(size: number): boolean {
+  return Number.isSafeInteger(size) && size >= MIN_APK_BYTES && size <= MAX_APK_BYTES;
+}
+
+function expectedApkName(versionName: string): string {
+  return `Card-Nest-${versionName}-android.apk`;
+}
+
+function getUpdateDirectory(): Directory {
+  return new Directory(Paths.document, APK_DIRECTORY_NAME);
+}
+
+function getFinalApkFile(assetName: string): File {
+  return new File(getUpdateDirectory(), assetName);
+}
+
+function isSafeAssetName(assetName: string, versionName: string): boolean {
+  return assetName === expectedApkName(versionName) && !assetName.includes('/') && !assetName.includes('\\');
+}
+
+export function getReleaseChannel(versionName: string): ReleaseChannel {
+  const suffix = normalizeVersionName(versionName).split('-').slice(1).join('-').toLowerCase();
+  if (suffix.startsWith('alpha')) return 'alpha';
+  if (suffix.startsWith('beta')) return 'beta';
+  return 'stable';
+}
+
+function channelRank(channel: ReleaseChannel): number {
+  if (channel === 'stable') return 2;
+  if (channel === 'beta') return 1;
+  return 0;
+}
+
+function acceptsReleaseChannel(current: ReleaseChannel, candidate: ReleaseChannel): boolean {
+  if (current === 'stable') return candidate === 'stable';
+  if (current === 'beta') return candidate !== 'alpha';
+  return true;
+}
+
+export function logUpdateDiagnostic(event: string, meta: Record<string, unknown> = {}) {
   const payload = {
     timestamp: new Date().toISOString(),
     event,
     platform: Platform.OS,
-    channel: Updates.channel || 'alpha',
-    runtimeVersion: Updates.runtimeVersion || '1.0.2-beta-f0D2X',
+    channel: Updates.channel || getReleaseChannel(Constants.expoConfig?.version || '0.0.0'),
+    runtimeVersion: Updates.runtimeVersion || null,
     updateId: Updates.updateId || null,
     isEmbeddedLaunch: Updates.isEmbeddedLaunch,
     ...meta,
   };
-  console.log('[CardNest Update Diagnostic]', JSON.stringify(payload, null, 2));
+  console.log('[CardNest Update Diagnostic]', JSON.stringify(payload));
 }
 
 export function getCurrentVersionInfo(): VersionInfo {
-  const configVersion = Constants.expoConfig?.version || '1.0.2-beta-f0D2X';
-  const configVersionCode = Constants.expoConfig?.android?.versionCode || 11;
+  const nativeVersion = Constants.nativeAppVersion;
+  const configVersion = Constants.expoConfig?.version;
+  const nativeBuild = Number.parseInt(Constants.nativeBuildVersion || '', 10);
+  const configVersionCode = Constants.expoConfig?.android?.versionCode;
   return {
-    versionName: configVersion,
-    versionCode: configVersionCode,
+    versionName: nativeVersion || configVersion || '0.0.0',
+    versionCode: Number.isFinite(nativeBuild) ? nativeBuild : configVersionCode || 0,
     otaRuntimeVersion: typeof Updates.runtimeVersion === 'string' ? Updates.runtimeVersion : undefined,
-    otaChannel: Updates.channel || 'alpha',
+    otaChannel: Updates.channel || getReleaseChannel(nativeVersion || configVersion || '0.0.0'),
     otaUpdateId: Updates.updateId || undefined,
     isEmbeddedLaunch: Updates.isEmbeddedLaunch,
   };
 }
 
 export function parseSemVer(versionStr: string): [number, number, number] {
-  const clean = versionStr.replace(/^v/u, '').split('-')[0];
-  const parts = clean.split('.').map((p) => parseInt(p, 10) || 0);
-  return [parts[0] || 0, parts[1] || 0, parts[2] || 0];
+  const match = normalizeVersionName(versionStr).match(/^(\d+)\.(\d+)\.(\d+)(?:-|$)/u);
+  if (!match) return [0, 0, 0];
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
 }
 
-export function parseVersionCodeFromRelease(tag: string, notes: string): number | undefined {
-  const notesMatch = notes.match(/versionCode:?\s*(\d+)/i);
-  if (notesMatch) {
-    return parseInt(notesMatch[1], 10);
+export function parseVersionCodeFromRelease(_tag: string, notes: string): number | undefined {
+  const match = notes.match(/\bversionCode\s*[:=]\s*(\d+)\b/iu);
+  if (!match) return undefined;
+  const parsed = Number.parseInt(match[1], 10);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function compareSemVer(left: string, right: string): number {
+  const leftParts = parseSemVer(left);
+  const rightParts = parseSemVer(right);
+  for (let index = 0; index < 3; index += 1) {
+    if (leftParts[index] !== rightParts[index]) return leftParts[index] - rightParts[index];
   }
-  const tagMatch = tag.match(/code-?(\d+)/i) || tag.match(/v?\d+\.\d+\.\d+-alpha-.*?(\d+)/i);
-  if (tagMatch) {
-    return parseInt(tagMatch[1], 10);
-  }
-  return undefined;
+  return 0;
 }
 
 export function isNewerVersion(current: VersionInfo, latestTag: string, latestNotes: string): boolean {
-  const cleanTag = latestTag.replace(/^v/u, '');
-  if (cleanTag === current.versionName) return false;
+  const candidate = normalizeVersionName(latestTag);
+  if (candidate === current.versionName) return false;
 
-  const currentSemVer = parseSemVer(current.versionName);
-  const latestSemVer = parseSemVer(cleanTag);
+  const currentChannel = getReleaseChannel(current.versionName);
+  const candidateChannel = getReleaseChannel(candidate);
+  if (!acceptsReleaseChannel(currentChannel, candidateChannel)) return false;
 
-  for (let i = 0; i < 3; i++) {
-    if (latestSemVer[i] > currentSemVer[i]) return true;
-    if (latestSemVer[i] < currentSemVer[i]) return false;
-  }
+  const semverComparison = compareSemVer(candidate, current.versionName);
+  if (semverComparison !== 0) return semverComparison > 0;
 
-  // Same semver major.minor.patch: compare versionCode if present
-  const latestCode = parseVersionCodeFromRelease(latestTag, latestNotes);
-  if (latestCode !== undefined && current.versionCode !== undefined) {
-    return latestCode > current.versionCode;
-  }
+  const rankComparison = channelRank(candidateChannel) - channelRank(currentChannel);
+  if (rankComparison !== 0) return rankComparison > 0;
 
-  // Fallback to numeric comparison
-  return cleanTag.localeCompare(current.versionName, undefined, { numeric: true, sensitivity: 'base' }) > 0;
+  const candidateCode = parseVersionCodeFromRelease(latestTag, latestNotes);
+  return candidateCode !== undefined && candidateCode > current.versionCode;
 }
 
-let cachedCheck: UpdateCheckResult | null = null;
-let lastCheckTime = 0;
+export function isOfficialApkAsset(
+  tagName: string,
+  versionName: string,
+  asset: Pick<NativeReleaseAsset, 'name' | 'url' | 'size'>,
+): boolean {
+  if (!isSafeAssetName(asset.name, versionName) || !isCredibleApkSize(asset.size)) return false;
+  try {
+    const url = new URL(asset.url);
+    const encodedTag = encodeURIComponent(tagName);
+    const encodedName = encodeURIComponent(asset.name);
+    return (
+      url.protocol === 'https:' &&
+      url.hostname.toLowerCase() === 'github.com' &&
+      url.pathname === `${OFFICIAL_REPOSITORY_PATH}${encodedTag}/${encodedName}`
+    );
+  } catch {
+    return false;
+  }
+}
+
+function parseSha256Digest(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const match = value.match(/^sha256:([0-9a-f]{64})$/iu);
+  return match?.[1].toLowerCase();
+}
+
+export function parseGithubRelease(release: GithubRelease): NativeRelease | null {
+  if (release.draft === true) return null;
+  const rawTag = typeof release.tag_name === 'string' ? release.tag_name : '';
+  const tagName = rawTag.trim();
+  const versionName = normalizeVersionName(tagName);
+  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u.test(versionName)) return null;
+  const notes = typeof release.body === 'string' ? release.body : '';
+  const assets = Array.isArray(release.assets) ? (release.assets as GithubAsset[]) : [];
+  const expectedName = expectedApkName(versionName);
+  const rawAsset = assets.find((asset) => asset.name === expectedName);
+  if (!rawAsset) return null;
+
+  const asset: NativeReleaseAsset = {
+    name: typeof rawAsset.name === 'string' ? rawAsset.name : '',
+    url: typeof rawAsset.browser_download_url === 'string' ? rawAsset.browser_download_url : '',
+    size: typeof rawAsset.size === 'number' ? rawAsset.size : 0,
+    sha256: parseSha256Digest(rawAsset.digest),
+  };
+  if (!isOfficialApkAsset(tagName, versionName, asset)) return null;
+
+  return {
+    versionName,
+    versionCode: parseVersionCodeFromRelease(tagName, notes),
+    tagName,
+    releaseNotes: notes || 'No release notes provided.',
+    publishedAt: typeof release.published_at === 'string' ? release.published_at : new Date(0).toISOString(),
+    asset,
+  };
+}
+
+function compareReleases(left: NativeRelease, right: NativeRelease): number {
+  const semverComparison = compareSemVer(left.versionName, right.versionName);
+  if (semverComparison !== 0) return semverComparison;
+  const channelComparison = channelRank(getReleaseChannel(left.versionName)) - channelRank(getReleaseChannel(right.versionName));
+  if (channelComparison !== 0) return channelComparison;
+  return (left.versionCode || 0) - (right.versionCode || 0);
+}
 
 export async function checkForOtaUpdate(): Promise<{ isAvailable: boolean; isDownloaded: boolean; error?: string }> {
   logUpdateDiagnostic('ota_check_started');
-  if (__DEV__ || Platform.OS === 'web') {
-    logUpdateDiagnostic('ota_check_skipped', { reason: 'development_or_web' });
-    return { isAvailable: false, isDownloaded: false };
-  }
+  if (__DEV__ || Platform.OS === 'web') return { isAvailable: false, isDownloaded: false };
   try {
     const check = await Updates.checkForUpdateAsync();
-    logUpdateDiagnostic('ota_check_completed', { isAvailable: check.isAvailable });
-    if (check.isAvailable) {
-      const fetchResult = await Updates.fetchUpdateAsync();
-      logUpdateDiagnostic('ota_fetch_completed', { isNew: fetchResult.isNew });
-      return { isAvailable: true, isDownloaded: fetchResult.isNew };
-    }
-    return { isAvailable: false, isDownloaded: false };
-  } catch (err: any) {
-    logUpdateDiagnostic('ota_check_error', { errorMessage: err?.message });
-    return { isAvailable: false, isDownloaded: false, error: err?.message };
+    if (!check.isAvailable) return { isAvailable: false, isDownloaded: false };
+    const fetchResult = await Updates.fetchUpdateAsync();
+    return { isAvailable: true, isDownloaded: fetchResult.isNew };
+  } catch (error) {
+    const message = errorMessage(error, 'Could not check for an over-the-air update.');
+    logUpdateDiagnostic('ota_check_error', { error: message });
+    return { isAvailable: false, isDownloaded: false, error: message };
   }
 }
 
 export async function applyOtaUpdate(): Promise<void> {
-  logUpdateDiagnostic('ota_apply_requested');
   if (Platform.OS === 'web' || __DEV__) return;
-  try {
-    await Updates.reloadAsync();
-  } catch (err: any) {
-    logUpdateDiagnostic('ota_apply_error', { errorMessage: err?.message });
-  }
+  await Updates.reloadAsync();
 }
 
-export async function checkForAppUpdate(force = false): Promise<UpdateCheckResult> {
-  logUpdateDiagnostic('app_check_started', { force });
+export async function checkForAppUpdate(
+  force = false,
+  options: { includeOta?: boolean } = {},
+): Promise<UpdateCheckResult> {
   const now = Date.now();
-  if (!force && cachedCheck && now - lastCheckTime < 10 * 60 * 1000) {
-    return cachedCheck;
-  }
+  if (!force && cachedCheck && now - lastCheckTime < CHECK_CACHE_MS) return cachedCheck;
 
   const current = getCurrentVersionInfo();
-  let otaStatus = { isAvailable: false, isDownloaded: false };
+  const otaStatus = options.includeOta
+    ? await checkForOtaUpdate()
+    : { isAvailable: false, isDownloaded: false, error: undefined };
 
-  if (!__DEV__ && Platform.OS !== 'web') {
-    otaStatus = await checkForOtaUpdate();
-  }
-
-  try {
-    const response = await fetch(GITHUB_RELEASES_ALL_API, {
-      headers: {
-        Accept: 'application/vnd.github.v3+json',
-        'User-Agent': 'CardNest-App',
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`GitHub API returned status ${response.status}`);
-    }
-
-    const releases: any[] = await response.json();
-    logUpdateDiagnostic('github_releases_fetched', { count: releases.length });
-
-    // Filter out draft releases
-    const validReleases = releases.filter((r) => !r.draft);
-    
-    // Find the latest valid release that is newer than current
-    let latestNativeRelease: any = null;
-    let isNativeNewer = false;
-
-    for (const release of validReleases) {
-      const tagName = release.tag_name || release.name || '';
-      const notes = release.body || '';
-      if (isNewerVersion(current, tagName, notes)) {
-        if (!latestNativeRelease || isNewerVersion(getCurrentVersionInfoWithTag(latestNativeRelease.tag_name), tagName, notes)) {
-          latestNativeRelease = release;
-          isNativeNewer = true;
-        }
-      }
-    }
-
-    const targetRelease = latestNativeRelease || validReleases[0] || null;
-    const latestTag = targetRelease ? (targetRelease.tag_name || targetRelease.name || current.versionName) : current.versionName;
-    const releaseNotes = targetRelease ? (targetRelease.body || 'No release notes available.') : '';
-    const apkAsset = targetRelease ? (targetRelease.assets || []).find((a: any) => a.name?.endsWith('.apk')) : null;
-    const apkUrl = apkAsset?.browser_download_url;
-
-    cachedCheck = {
-      isUpdateAvailable: isNativeNewer || otaStatus.isAvailable,
-      isOtaAvailable: otaStatus.isAvailable,
-      isOtaDownloaded: otaStatus.isDownloaded,
-      isNativeUpdateAvailable: isNativeNewer,
-      currentVersion: current,
-      latestVersion: targetRelease
-        ? {
-            versionName: latestTag.replace(/^v/u, ''),
-            versionCode: parseVersionCodeFromRelease(latestTag, releaseNotes),
-            releaseNotes,
-            apkUrl,
-            publishedAt: targetRelease.published_at || new Date().toISOString(),
-          }
-        : undefined,
-      checkedAt: new Date().toISOString(),
-    };
-    lastCheckTime = now;
-    logUpdateDiagnostic('app_check_completed', {
-      isUpdateAvailable: cachedCheck.isUpdateAvailable,
-      isNativeUpdateAvailable: isNativeNewer,
-      isOtaAvailable: otaStatus.isAvailable,
-    });
-    return cachedCheck;
-  } catch (err: any) {
-    logUpdateDiagnostic('app_check_failed', { error: err?.message });
+  if (Platform.OS !== 'android') {
     return {
       isUpdateAvailable: otaStatus.isAvailable,
       isOtaAvailable: otaStatus.isAvailable,
       isOtaDownloaded: otaStatus.isDownloaded,
+      isNativeUpdateAvailable: false,
       currentVersion: current,
       checkedAt: new Date().toISOString(),
-      error: err?.message || 'Network unavailable',
+      error: otaStatus.error,
+    };
+  }
+
+  try {
+    const response = await fetch(GITHUB_RELEASES_ALL_API, {
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Card-Nest-Android' },
+    });
+    if (!response.ok) throw new Error(`Release server returned status ${response.status}.`);
+    const payload: unknown = await response.json();
+    if (!Array.isArray(payload)) throw new Error('Release server returned an invalid response.');
+
+    const currentChannel = getReleaseChannel(current.versionName);
+    const releases = payload
+      .map((item) => parseGithubRelease(item as GithubRelease))
+      .filter((item): item is NativeRelease => Boolean(item))
+      .filter((item) => acceptsReleaseChannel(currentChannel, getReleaseChannel(item.versionName)))
+      .sort((left, right) => compareReleases(right, left));
+    const latest = releases.find((item) => isNewerVersion(current, item.tagName, item.releaseNotes));
+
+    cachedCheck = {
+      isUpdateAvailable: Boolean(latest) || otaStatus.isAvailable,
+      isOtaAvailable: otaStatus.isAvailable,
+      isOtaDownloaded: otaStatus.isDownloaded,
+      isNativeUpdateAvailable: Boolean(latest),
+      currentVersion: current,
+      latestVersion: latest,
+      checkedAt: new Date().toISOString(),
+    };
+    lastCheckTime = now;
+    return cachedCheck;
+  } catch (error) {
+    const message = errorMessage(error, 'Could not reach the Card Nest release service.');
+    logUpdateDiagnostic('app_check_failed', { error: message });
+    return {
+      isUpdateAvailable: otaStatus.isAvailable,
+      isOtaAvailable: otaStatus.isAvailable,
+      isOtaDownloaded: otaStatus.isDownloaded,
+      isNativeUpdateAvailable: false,
+      currentVersion: current,
+      checkedAt: new Date().toISOString(),
+      error: message,
     };
   }
 }
 
-function getCurrentVersionInfoWithTag(tag: string): VersionInfo {
-  const clean = tag.replace(/^v/u, '');
-  return {
-    versionName: clean,
-    versionCode: 0,
-  };
+function metadataIsWellFormed(value: unknown): value is DownloadedApkMetadata {
+  if (!value || typeof value !== 'object') return false;
+  const metadata = value as Partial<DownloadedApkMetadata>;
+  return (
+    typeof metadata.versionName === 'string' &&
+    typeof metadata.assetName === 'string' &&
+    typeof metadata.size === 'number' &&
+    typeof metadata.uri === 'string' &&
+    typeof metadata.sha256 === 'string' &&
+    /^[0-9a-f]{64}$/u.test(metadata.sha256) &&
+    typeof metadata.downloadedAt === 'string'
+  );
 }
 
-export async function downloadAndInstallApk(
-  apkUrl: string,
+async function removeStoredApk(metadata?: DownloadedApkMetadata): Promise<void> {
+  if (metadata) {
+    try {
+      const file = new File(metadata.uri);
+      if (file.exists) file.delete();
+    } catch {
+      // Invalid or already-removed files are handled by clearing their metadata.
+    }
+  }
+  await SecureStore.deleteItemAsync(APK_METADATA_KEY).catch(() => undefined);
+}
+
+async function sha256File(file: File): Promise<string> {
+  const hasher = sha256.create();
+  const reader = file.readableStream().getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      hasher.update(value);
+    }
+    return bytesToHex(hasher.digest());
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+export async function getDownloadedApk(release?: NativeRelease): Promise<DownloadedApkMetadata | null> {
+  const raw = await SecureStore.getItemAsync(APK_METADATA_KEY);
+  if (!raw) return null;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    await removeStoredApk();
+    return null;
+  }
+  if (!metadataIsWellFormed(parsed)) {
+    await removeStoredApk();
+    return null;
+  }
+
+  const metadata = parsed;
+  const expectedFile = getFinalApkFile(metadata.assetName);
+  const isExpectedPath = metadata.uri === expectedFile.uri;
+  const matchesRelease =
+    !release ||
+    (metadata.versionName === release.versionName &&
+      metadata.assetName === release.asset.name &&
+      metadata.size === release.asset.size &&
+      (!release.asset.sha256 || metadata.sha256 === release.asset.sha256));
+  if (!isExpectedPath || !matchesRelease || !isCredibleApkSize(metadata.size) || !expectedFile.exists || expectedFile.size !== metadata.size) {
+    await removeStoredApk(metadata);
+    return null;
+  }
+  return metadata;
+}
+
+function validateDownloadResponseUrl(responseUrl: string): boolean {
+  try {
+    const url = new URL(responseUrl);
+    const host = url.hostname.toLowerCase();
+    return (
+      url.protocol === 'https:' &&
+      (host === 'github.com' || host === 'objects.githubusercontent.com' || host === 'release-assets.githubusercontent.com')
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function performDownload(
+  release: NativeRelease,
   onProgress?: (percent: number) => void,
-): Promise<{ success: boolean; error?: string }> {
-  if (Platform.OS !== 'android') {
-    return { success: false, error: 'In-app APK installation is supported on Android.' };
+): Promise<DownloadedApkMetadata> {
+  if (!isOfficialApkAsset(release.tagName, release.versionName, release.asset)) {
+    throw new Error('The release package did not pass Card Nest security validation.');
+  }
+
+  const existing = await getDownloadedApk(release);
+  if (existing) {
+    onProgress?.(100);
+    return existing;
+  }
+
+  const directory = getUpdateDirectory();
+  directory.create({ idempotent: true, intermediates: true });
+  const partial = new File(directory, `${release.asset.name}.part`);
+  const finalFile = getFinalApkFile(release.asset.name);
+  if (partial.exists) partial.delete();
+  if (finalFile.exists) finalFile.delete();
+  partial.create({ intermediates: true, overwrite: true });
+
+  const response = await expoFetch(release.asset.url, {
+    headers: { Accept: APK_MIME_TYPE, 'User-Agent': 'Card-Nest-Android' },
+  });
+  if (!response.ok || !response.body || !validateDownloadResponseUrl(response.url)) {
+    if (partial.exists) partial.delete();
+    throw new Error(`The update download failed with status ${response.status}.`);
+  }
+
+  const responseLength = Number.parseInt(response.headers.get('content-length') || '', 10);
+  if (Number.isFinite(responseLength) && responseLength !== release.asset.size) {
+    if (partial.exists) partial.delete();
+    throw new Error('The update package size does not match the official release.');
+  }
+
+  const reader = response.body.getReader();
+  const writer = partial.writableStream().getWriter();
+  const hasher = sha256.create();
+  let received = 0;
+  onProgress?.(0);
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      received += value.byteLength;
+      if (received > release.asset.size) throw new Error('The update package exceeded its expected size.');
+      hasher.update(value);
+      await writer.write(value);
+      onProgress?.(Math.min(99, Math.floor((received / release.asset.size) * 100)));
+    }
+    await writer.close();
+  } catch (error) {
+    await writer.abort(error).catch(() => undefined);
+    if (partial.exists) partial.delete();
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+
+  const digest = bytesToHex(hasher.digest());
+  if (received !== release.asset.size || partial.size !== release.asset.size) {
+    if (partial.exists) partial.delete();
+    throw new Error('The update package download was incomplete.');
+  }
+  if (release.asset.sha256 && digest !== release.asset.sha256) {
+    if (partial.exists) partial.delete();
+    throw new Error('The update package checksum did not match the official release.');
+  }
+
+  partial.move(finalFile);
+  const metadata: DownloadedApkMetadata = {
+    versionName: release.versionName,
+    versionCode: release.versionCode,
+    assetName: release.asset.name,
+    size: release.asset.size,
+    uri: finalFile.uri,
+    sha256: digest,
+    downloadedAt: new Date().toISOString(),
+  };
+  await SecureStore.setItemAsync(APK_METADATA_KEY, JSON.stringify(metadata));
+  onProgress?.(100);
+  return metadata;
+}
+
+export function downloadNativeUpdate(
+  release: NativeRelease,
+  onProgress?: (percent: number) => void,
+): Promise<DownloadedApkMetadata> {
+  if (Platform.OS !== 'android') return Promise.reject(new Error('Native APK updates are available on Android only.'));
+  if (activeDownload) return activeDownload;
+  activeDownload = performDownload(release, onProgress).finally(() => {
+    activeDownload = null;
+  });
+  return activeDownload;
+}
+
+async function canRequestPackageInstalls(): Promise<boolean> {
+  const nativeModule = requireOptionalNativeModule<NativeIntentLauncherModule>('ExpoIntentLauncher');
+  if (!nativeModule?.canRequestPackageInstalls) return true;
+  return nativeModule.canRequestPackageInstalls();
+}
+
+export async function launchApkInstaller(metadata: DownloadedApkMetadata): Promise<InstallerLaunchResult> {
+  if (Platform.OS !== 'android') return { status: 'error', error: 'Native APK installation is available on Android only.' };
+  const stored = await getDownloadedApk();
+  if (!stored || stored.uri !== metadata.uri || stored.sha256 !== metadata.sha256) {
+    return { status: 'error', error: 'The downloaded update is missing or invalid. Download it again.' };
   }
 
   try {
-    const docDir = (FileSystem as any).documentDirectory || '';
-    const targetPath = `${docDir}CardNest-update.apk`;
-    const downloadResumable = FileSystem.createDownloadResumable(
-      apkUrl,
-      targetPath,
-      {},
-      (downloadProgress) => {
-        const progress =
-          downloadProgress.totalBytesWritten / downloadProgress.totalBytesExpectedToWrite;
-        if (onProgress) onProgress(Math.round(progress * 100));
-      },
-    );
-
-    const result = await downloadResumable.downloadAsync();
-    if (!result || !result.uri) {
-      return { success: false, error: 'Failed to download update package.' };
-    }
-
-    const contentUri = await FileSystem.getContentUriAsync(result.uri);
+    if (!(await canRequestPackageInstalls())) return { status: 'permissionRequired' };
+    const file = new File(stored.uri);
     await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
-      data: contentUri,
-      type: 'application/vnd.android.package-archive',
-      flags: 1, // FLAG_GRANT_READ_URI_PERMISSION
+      data: file.contentUri,
+      type: APK_MIME_TYPE,
+      flags: 1,
     });
-
-    return { success: true };
-  } catch (err: any) {
-    return { success: false, error: err?.message || 'Package installation failed.' };
+    return { status: 'launched' };
+  } catch (error) {
+    return { status: 'error', error: errorMessage(error, 'Android could not open the package installer.') };
   }
+}
+
+export async function openInstallPermissionSettings(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  const packageName = Constants.expoConfig?.android?.package || 'dev.ytosko.cardnest';
+  await IntentLauncher.startActivityAsync(IntentLauncher.ActivityAction.MANAGE_UNKNOWN_APP_SOURCES, {
+    data: `package:${packageName}`,
+  });
+}
+
+export async function verifyDownloadedApk(metadata: DownloadedApkMetadata): Promise<boolean> {
+  const stored = await getDownloadedApk();
+  if (!stored || stored.uri !== metadata.uri || stored.sha256 !== metadata.sha256) return false;
+  const digest = await sha256File(new File(stored.uri));
+  if (digest === stored.sha256) return true;
+  await removeStoredApk(stored);
+  return false;
+}
+
+export function resetUpdateServiceCacheForTests() {
+  cachedCheck = null;
+  lastCheckTime = 0;
+  activeDownload = null;
 }

@@ -25,7 +25,7 @@ import { useAuth } from '@/src/features/auth/auth-provider';
 import { cardKeys, useCards } from '@/src/features/cards/card-hooks';
 import { CardListRow } from '@/src/features/cards/components/card-list-row';
 import { bulkDeleteCards, bulkToggleFavorite, isSavedContact, markCardExported } from '@/src/features/cards/card-service';
-import { exportCardToContacts } from '@/src/features/contacts/contact-export';
+import { exportCardsToContacts } from '@/src/features/contacts/contact-export';
 import { useCaptureQueue } from '@/src/features/capture/capture-queue-provider';
 import { useAppTheme } from '@/src/theme/theme-provider';
 
@@ -182,27 +182,23 @@ export default function ContactsScreen() {
     setNoticeMessage(null);
     try {
       const selectedCards = rawCards.filter((c) => selectedIds.has(c.id));
-      let exportedCount = 0;
-      let skippedCount = 0;
-
-      for (const card of selectedCards) {
-        try {
-          await exportCardToContacts(card);
-          await markCardExported(card.id).catch(() => undefined);
-          exportedCount++;
-        } catch {
-          skippedCount++;
-        }
-      }
+      const result = await exportCardsToContacts(selectedCards);
+      await Promise.all(result.succeeded.map(({ cardId }) => markCardExported(cardId).catch(() => undefined)));
+      const exportedCount = result.succeeded.length;
+      const skippedCount = result.failed.length;
 
       await queryClient.invalidateQueries({ queryKey: cardKeys.all });
-      setNoticeTone('success');
+      setNoticeTone(skippedCount === 0 ? 'success' : 'error');
       setNoticeMessage(
         `${exportedCount} ${exportedCount === 1 ? 'contact' : 'contacts'} saved to your phone` +
-          (skippedCount > 0 ? ` (${skippedCount} skipped)` : '') +
+          (skippedCount > 0 ? `; ${skippedCount} not saved. ${result.failed[0].message}` : '') +
           '.'
       );
-      exitSelectionMode();
+      if (skippedCount === 0) {
+        exitSelectionMode();
+      } else {
+        setSelectedIds(new Set(result.failed.map(({ cardId }) => cardId)));
+      }
     } catch {
       setNoticeTone('error');
       setNoticeMessage('Could not export selected contacts to phone contacts.');

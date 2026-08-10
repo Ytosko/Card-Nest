@@ -1,0 +1,146 @@
+diff --git a/node_modules/expo-contacts/android/src/main/java/expo/modules/contacts/Contact.kt b/node_modules/expo-contacts/android/src/main/java/expo/modules/contacts/Contact.kt
+index cd13a58..43d4ffa 100644
+--- a/node_modules/expo-contacts/android/src/main/java/expo/modules/contacts/Contact.kt
++++ b/node_modules/expo-contacts/android/src/main/java/expo/modules/contacts/Contact.kt
+@@ -1,5 +1,6 @@
+ package expo.modules.contacts
+ 
++import android.accounts.Account
+ import android.content.ContentProviderOperation
+ import android.content.ContentValues
+ import android.database.Cursor
+@@ -195,12 +196,15 @@ class Contact(var contactId: String, var appContext: AppContext) {
+     return stream.toByteArray()
+   }
+ 
+-  fun toInsertOperationList(): ArrayList<ContentProviderOperation> {
++  fun toInsertOperationList(defaultAccount: Account?): ArrayList<ContentProviderOperation> {
+     val ops = ArrayList<ContentProviderOperation>()
+     var op = ContentProviderOperation.newInsert(RawContacts.CONTENT_URI)
+-      .withValue(RawContacts.ACCOUNT_TYPE, null)
+-      .withValue(RawContacts.ACCOUNT_NAME, null)
+       .withValue(RawContacts.STARRED, isFavorite)
++    if (defaultAccount != null) {
++      op = op
++        .withValue(RawContacts.ACCOUNT_TYPE, defaultAccount.type)
++        .withValue(RawContacts.ACCOUNT_NAME, defaultAccount.name)
++    }
+     ops.add(op.build())
+     op = ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
+       .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
+diff --git a/node_modules/expo-contacts/android/src/main/java/expo/modules/contacts/ContactsExceptions.kt b/node_modules/expo-contacts/android/src/main/java/expo/modules/contacts/ContactsExceptions.kt
+index bf3c649..756f440 100644
+--- a/node_modules/expo-contacts/android/src/main/java/expo/modules/contacts/ContactsExceptions.kt
++++ b/node_modules/expo-contacts/android/src/main/java/expo/modules/contacts/ContactsExceptions.kt
+@@ -14,6 +14,10 @@ class RetrieveIdException : CodedException("Couldn't get the contact id")
+ 
+ class AddContactException : CodedException("Given contact couldn't be added")
+ 
++class UnsupportedDefaultContactAccountException : CodedException(
++  "The default Contacts destination cannot safely store this contact. Choose a writable cloud or device account in Android Contacts settings and try again."
++)
++
+ class ContactNotFoundException : CodedException("Couldn't find contact")
+ 
+ class ContactUpdateException : CodedException("Given contact couldn't be updated")
+diff --git a/node_modules/expo-contacts/android/src/main/java/expo/modules/contacts/ContactsModule.kt b/node_modules/expo-contacts/android/src/main/java/expo/modules/contacts/ContactsModule.kt
+index 44ccb27..7c773e7 100644
+--- a/node_modules/expo-contacts/android/src/main/java/expo/modules/contacts/ContactsModule.kt
++++ b/node_modules/expo-contacts/android/src/main/java/expo/modules/contacts/ContactsModule.kt
+@@ -1,12 +1,14 @@
+ package expo.modules.contacts
+ 
+ import android.Manifest
++import android.accounts.Account
+ import android.app.Activity
+ import android.content.ContentResolver
+ import android.content.Intent
+ import android.database.ContentObserver
+ import android.database.Cursor
+ import android.net.Uri
++import android.os.Build
+ import android.os.Bundle
+ import android.os.Handler
+ import android.os.HandlerThread
+@@ -202,7 +204,7 @@ class ContactsModule : Module() {
+       ensurePermissions()
+ 
+       val contact = mutateContact(null, data)
+-      val ops = contact.toInsertOperationList()
++      val ops = contact.toInsertOperationList(getDefaultAccountForNewContact())
+       val result = resolver.applyBatch(ContactsContract.AUTHORITY, ops)
+       if (result.isNotEmpty()) {
+         resolver.query(
+@@ -330,6 +332,24 @@ class ContactsModule : Module() {
+     val intent = Intent(Intent.ACTION_INSERT, ContactsContract.Contacts.CONTENT_URI)
+     intent.putExtra(ContactsContract.Intents.Insert.NAME, contact.getFinalDisplayName())
+     intent.putParcelableArrayListExtra(ContactsContract.Intents.Insert.DATA, contact.contentValues)
++    // Some Android Contacts editors ignore StructuredPostal rows supplied through
++    // Insert.DATA. Also send the documented primary POSTAL extras.
++    contact.addresses.firstOrNull()?.let { address ->
++      val formattedAddress = listOfNotNull(
++        address.getString("street"),
++        address.getString("city"),
++        address.getString("region"),
++        address.getString("postalCode"),
++        address.getString("country")
++      ).filter { it.isNotBlank() }.joinToString(", ")
++      if (formattedAddress.isNotBlank()) {
++        intent.putExtra(ContactsContract.Intents.Insert.POSTAL, formattedAddress)
++        intent.putExtra(
++          ContactsContract.Intents.Insert.POSTAL_TYPE,
++          address.mapStringToType(address.label)
++        )
++      }
++    }
+     contactManipulationPromise = promise
+     currentActivity.startActivityForResult(intent, RC_ADD_CONTACT)
+   }
+@@ -348,6 +368,26 @@ class ContactsModule : Module() {
+   private val resolver: ContentResolver
+     get() = (appContext.reactContext ?: throw Exceptions.ReactContextLost()).contentResolver
+ 
++  @Suppress("DEPRECATION")
++  private fun getDefaultAccountForNewContact(): Account? {
++    return when {
++      Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA -> {
++        val defaultAccount = ContactsContract.RawContacts.DefaultAccount
++          .getDefaultAccountForNewContacts(resolver)
++        when (defaultAccount.state) {
++          ContactsContract.RawContacts.DefaultAccount.DefaultAccountAndState.DEFAULT_ACCOUNT_STATE_CLOUD ->
++            defaultAccount.account
++          ContactsContract.RawContacts.DefaultAccount.DefaultAccountAndState.DEFAULT_ACCOUNT_STATE_SIM ->
++            throw UnsupportedDefaultContactAccountException()
++          else -> null
++        }
++      }
++      Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ->
++        ContactsContract.Settings.getDefaultAccount(resolver)
++      else -> null
++    }
++  }
++
+   private fun mutateContact(initContact: Contact?, data: Map<String, Any>): Contact {
+     val contact = initContact ?: Contact(UUID.randomUUID().toString(), appContext)
+ 
+diff --git a/node_modules/expo-contacts/android/src/main/java/expo/modules/contacts/models/PostalAddressModel.kt b/node_modules/expo-contacts/android/src/main/java/expo/modules/contacts/models/PostalAddressModel.kt
+index 9bfed69..f334095 100644
+--- a/node_modules/expo-contacts/android/src/main/java/expo/modules/contacts/models/PostalAddressModel.kt
++++ b/node_modules/expo-contacts/android/src/main/java/expo/modules/contacts/models/PostalAddressModel.kt
+@@ -58,6 +58,16 @@ class PostalAddressModel : BaseModel() {
+   override val contentValues: ContentValues
+     get() {
+       val values = super.contentValues
++      val formattedAddress = listOfNotNull(
++        getString("street"),
++        getString("city"),
++        getString("region"),
++        getString("postalCode"),
++        getString("country")
++      ).filter { it.isNotBlank() }.joinToString(", ")
++      if (formattedAddress.isNotBlank()) {
++        values.put(ContactsContract.CommonDataKinds.StructuredPostal.FORMATTED_ADDRESS, formattedAddress)
++      }
+       values.put(ContactsContract.CommonDataKinds.StructuredPostal.STREET, getString("street"))
+       values.put(ContactsContract.CommonDataKinds.StructuredPostal.CITY, getString("city"))
+       values.put(ContactsContract.CommonDataKinds.StructuredPostal.REGION, getString("region"))

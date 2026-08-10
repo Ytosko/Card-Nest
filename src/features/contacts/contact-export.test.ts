@@ -2,10 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { CardWithRelations } from '@/src/features/cards/card-service';
 
-import { checkNativeContactMatch, exportCardToContacts } from './contact-export';
+import { checkNativeContactMatch, exportCardToContacts, exportCardsToContacts } from './contact-export';
 
 const mocks = vi.hoisted(() => ({
   addContactAsync: vi.fn().mockResolvedValue('native-contact-1'),
+  presentFormAsync: vi.fn().mockResolvedValue(0),
   getContactsAsync: vi.fn(),
   getPermissionsAsync: vi.fn().mockResolvedValue({ granted: true }),
   requestPermissionsAsync: vi.fn().mockResolvedValue({ granted: true }),
@@ -16,6 +17,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('expo-contacts', () => ({
   addContactAsync: mocks.addContactAsync,
+  presentFormAsync: mocks.presentFormAsync,
   getContactsAsync: mocks.getContactsAsync,
   getPermissionsAsync: mocks.getPermissionsAsync,
   requestPermissionsAsync: mocks.requestPermissionsAsync,
@@ -75,6 +77,14 @@ describe('exportCardToContacts', () => {
     mocks.requestPermissionsAsync.mockResolvedValue({ granted: true });
     mocks.getPermissionsAsync.mockResolvedValue({ granted: true });
     mocks.addContactAsync.mockResolvedValue('native-contact-1');
+    mocks.presentFormAsync.mockResolvedValue(0);
+    mocks.getContactsAsync
+      .mockReset()
+      .mockResolvedValueOnce({ data: [], hasNextPage: false })
+      .mockResolvedValue({
+        data: [{ id: 'native-contact-1', emails: [{ email: 'ada@engines.example' }], phoneNumbers: [] }],
+        hasNextPage: false,
+      });
     mocks.getSignedContactPhotoUrl.mockResolvedValue('https://storage.example/signed-photo');
     mocks.downloadFileAsync.mockResolvedValue(undefined);
   });
@@ -123,10 +133,12 @@ describe('exportCardToContacts', () => {
       expect.objectContaining({ uri: 'file:///cache/card-nest-contact-export-card-1.jpg' }),
       { idempotent: true }
     );
-    expect(mocks.addContactAsync).toHaveBeenCalledTimes(1);
+    expect(mocks.presentFormAsync).toHaveBeenCalledTimes(1);
+    expect(mocks.presentFormAsync.mock.calls[0][0]).toBeNull();
+    expect(mocks.addContactAsync).not.toHaveBeenCalled();
     expect(mocks.deletePhoto).toHaveBeenCalledTimes(1);
 
-    const payload = mocks.addContactAsync.mock.calls[0][0];
+    const payload = mocks.presentFormAsync.mock.calls[0][1];
     expect(payload).toMatchObject({
       contactType: 'person',
       name: 'Ada Lovelace',
@@ -174,17 +186,17 @@ describe('exportCardToContacts', () => {
   it('falls back to primary phone and email values when relational rows are unavailable', async () => {
     await exportCardToContacts(makeCard());
 
-    const payload = mocks.addContactAsync.mock.calls[0][0];
+    const payload = mocks.presentFormAsync.mock.calls[0][1];
     expect(payload.emails).toEqual([{ email: 'ada@engines.example', label: 'work' }]);
     expect(payload.phoneNumbers).toEqual([{ number: '+880 1711-000001', label: 'mobile' }]);
   });
 
   it('cleans up the temporary photo even if native contact creation fails', async () => {
-    mocks.addContactAsync.mockRejectedValueOnce(new Error('Native write failed'));
+    mocks.presentFormAsync.mockRejectedValueOnce(new Error('Native editor failed'));
 
     await expect(
       exportCardToContacts(makeCard({ contact_photo_path: 'user-1/card-1/photo.jpg' }))
-    ).rejects.toThrow('Native write failed');
+    ).rejects.toThrow('Native editor failed');
     expect(mocks.deletePhoto).toHaveBeenCalledTimes(1);
   });
 
@@ -193,12 +205,62 @@ describe('exportCardToContacts', () => {
 
     await expect(exportCardToContacts(makeCard())).rejects.toThrow('Contact permission is needed');
     expect(mocks.addContactAsync).not.toHaveBeenCalled();
+    expect(mocks.presentFormAsync).not.toHaveBeenCalled();
+  });
+
+  it('does not report success when the native editor closes without saving', async () => {
+    mocks.getContactsAsync.mockResolvedValue({ data: [] });
+
+    await expect(exportCardToContacts(makeCard())).resolves.toBeNull();
+    expect(mocks.presentFormAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not mistake a pre-existing matching contact for a newly saved contact', async () => {
+    mocks.getContactsAsync.mockReset().mockResolvedValue({
+      data: [{ id: 'existing-contact', emails: [{ email: 'ada@engines.example' }], phoneNumbers: [] }],
+      hasNextPage: false,
+    });
+
+    await expect(exportCardToContacts(makeCard())).resolves.toBeNull();
+  });
+
+  it('uses direct default-account insertion for bulk export without opening editors', async () => {
+    const cards = [makeCard(), makeCard({ id: 'card-2', primary_email: 'grace@example.com' })];
+    mocks.addContactAsync
+      .mockResolvedValueOnce('native-contact-1')
+      .mockResolvedValueOnce('native-contact-2');
+
+    const result = await exportCardsToContacts(cards);
+
+    expect(mocks.presentFormAsync).not.toHaveBeenCalled();
+    expect(mocks.addContactAsync).toHaveBeenCalledTimes(2);
+    expect(result).toEqual({
+      succeeded: [
+        { cardId: 'card-1', nativeContactId: 'native-contact-1' },
+        { cardId: 'card-2', nativeContactId: 'native-contact-2' },
+      ],
+      failed: [],
+    });
+  });
+
+  it('keeps per-contact failures in the bulk result', async () => {
+    const cards = [makeCard(), makeCard({ id: 'card-2' })];
+    mocks.addContactAsync
+      .mockResolvedValueOnce('native-contact-1')
+      .mockRejectedValueOnce(new Error('Default destination is not writable'));
+
+    const result = await exportCardsToContacts(cards);
+
+    expect(result.succeeded).toEqual([{ cardId: 'card-1', nativeContactId: 'native-contact-1' }]);
+    expect(result.failed).toEqual([
+      { cardId: 'card-2', message: 'Default destination is not writable' },
+    ]);
   });
 });
 
 describe('checkNativeContactMatch', () => {
   it('matches on a secondary phone number, not just the primary', async () => {
-    mocks.getContactsAsync.mockResolvedValue({
+    mocks.getContactsAsync.mockReset().mockResolvedValue({
       data: [{ id: 'native-9', emails: [], phoneNumbers: [{ number: '+880 2 955555' }] }],
     });
 
@@ -214,7 +276,7 @@ describe('checkNativeContactMatch', () => {
   });
 
   it('does not match on names alone when no values overlap', async () => {
-    mocks.getContactsAsync.mockResolvedValue({
+    mocks.getContactsAsync.mockReset().mockResolvedValue({
       data: [{ id: 'native-2', name: 'Ada Lovelace', emails: [], phoneNumbers: [{ number: '+15550100' }] }],
     });
 

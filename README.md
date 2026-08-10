@@ -164,3 +164,4 @@ npm run assets:brand
 See [Supabase operations](docs/SUPABASE.md) and [architecture](docs/ARCHITECTURE.md) for details.
 See [authentication operations](docs/AUTHENTICATION.md) for hosted Auth, Postmark, email templates, and deep links.
 See [Coolify deployment](docs/COOLIFY_DEPLOYMENT.md) for the exact GitHub-to-production setup.
+See [Android native updates](docs/ANDROID_UPDATES.md) for release selection, verified APK reuse, and installer handoff behavior.

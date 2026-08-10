@@ -1,0 +1,27 @@
+diff --git a/node_modules/expo-intent-launcher/android/src/main/java/expo/modules/intentlauncher/IntentLauncherModule.kt b/node_modules/expo-intent-launcher/android/src/main/java/expo/modules/intentlauncher/IntentLauncherModule.kt
+index 56bd930..0c92e5a 100644
+--- a/node_modules/expo-intent-launcher/android/src/main/java/expo/modules/intentlauncher/IntentLauncherModule.kt
++++ b/node_modules/expo-intent-launcher/android/src/main/java/expo/modules/intentlauncher/IntentLauncherModule.kt
+@@ -9,6 +9,7 @@ import android.graphics.Canvas
+ import android.graphics.drawable.AdaptiveIconDrawable
+ import android.graphics.drawable.BitmapDrawable
+ import android.net.Uri
++import android.os.Build
+ import android.os.Bundle
+ import android.util.Base64
+ import androidx.core.os.bundleOf
+@@ -33,6 +34,14 @@ class IntentLauncherModule : Module() {
+   override fun definition() = ModuleDefinition {
+     Name("ExpoIntentLauncher")
+ 
++    AsyncFunction("canRequestPackageInstalls") {
++      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
++        context.packageManager.canRequestPackageInstalls()
++      } else {
++        true
++      }
++    }
++
+     AsyncFunction("startActivity") { activityAction: String, params: IntentLauncherParams, promise: Promise ->
+       if (pendingPromise != null) {
+         throw ActivityAlreadyStartedException()

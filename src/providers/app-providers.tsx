@@ -5,6 +5,7 @@ import { AppThemeProvider } from '@/src/theme/theme-provider';
 import { AuthProvider } from '@/src/features/auth/auth-provider';
 import { CaptureQueueProvider } from '@/src/features/capture/capture-queue-provider';
 import { SecurityProvider } from '@/src/features/security/security-provider';
+import { UpdateProvider } from '@/src/features/updates/update-provider';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -24,7 +25,9 @@ export function AppProviders({ children }: PropsWithChildren) {
       <AppThemeProvider>
         <AuthProvider>
           <SecurityProvider>
-            <CaptureQueueProvider>{children}</CaptureQueueProvider>
+            <UpdateProvider>
+              <CaptureQueueProvider>{children}</CaptureQueueProvider>
+            </UpdateProvider>
           </SecurityProvider>
         </AuthProvider>
       </AppThemeProvider>
