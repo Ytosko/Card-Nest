@@ -28,43 +28,7 @@ export interface PasskeyAvailability {
 
 export type PasskeyResult<T> =
   | { success: true; data: T }
-<<<<<<< HEAD
   | { success: false; error: string; code?: PasskeyErrorCode; isCancelled?: boolean };
-=======
-  | { success: false; error: string; code?: string; isCancelled?: boolean };
-
-let overrideNativeModule: any = null;
-
-export function setNativePasskeysModule(mod: any) {
-  overrideNativeModule = mod;
-}
-
-function getNativePasskeysModule(): any | null {
-  if (overrideNativeModule) return overrideNativeModule;
-  if (Platform.OS === 'web') return null;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const mod = require('react-native-passkeys');
-    if (mod && (typeof mod.isSupported === 'function' || typeof mod.create === 'function' || typeof mod.default?.isSupported === 'function')) {
-      return mod.default || mod;
-    }
-  } catch {
-    // Native module not present in current binary (e.g. Expo Go)
-  }
-  return null;
-}
-
-function isUserCancellation(err: any): boolean {
-  const message = (err?.message || err?.name || String(err || '')).toLowerCase();
-  return (
-    message.includes('cancel') ||
-    message.includes('abort') ||
-    message.includes('notallowederror') ||
-    message.includes('user_cancel') ||
-    message.includes('dismiss')
-  );
-}
->>>>>>> 5e7a263056d44fb2e9db9b2b11f445ef343b02db
 
 let overrideNativeModule: any = null;
 
@@ -105,7 +69,6 @@ export function getPasskeyAvailability(): PasskeyAvailability {
     return { isSupported: true };
   }
 
-<<<<<<< HEAD
   if (isExpoGoEnvironment()) {
     return { isSupported: false, code: 'PASSKEY_EXPO_GO', reason: 'Passkeys require a standalone build or development client.' };
   }
@@ -123,15 +86,6 @@ export function getPasskeyAvailability(): PasskeyAvailability {
     return { isSupported: true };
   } catch (err: any) {
     return { isSupported: false, code: 'PASSKEY_UNSUPPORTED', reason: err?.message || 'Passkey support check failed.' };
-=======
-  const nativeMod = getNativePasskeysModule();
-  if (!nativeMod) return false;
-
-  try {
-    return Boolean(nativeMod.isSupported());
-  } catch {
-    return false;
->>>>>>> 5e7a263056d44fb2e9db9b2b11f445ef343b02db
   }
 }
 
@@ -193,7 +147,62 @@ export async function listUserPasskeys(): Promise<PasskeyResult<UserPasskey[]>> 
   }
 }
 
+export interface PasskeyDiagnosticEvent {
+  stage:
+    | 'registration_start_requested'
+    | 'registration_options_received'
+    | 'native_create_started'
+    | 'native_create_succeeded'
+    | 'native_create_failed'
+    | 'registration_verify_started'
+    | 'registration_verify_succeeded'
+    | 'registration_verify_failed'
+    | 'authentication_start_requested'
+    | 'authentication_options_received'
+    | 'native_get_started'
+    | 'native_get_succeeded'
+    | 'native_get_failed'
+    | 'authentication_verify_started'
+    | 'authentication_verify_succeeded'
+    | 'authentication_verify_failed';
+  platform: string;
+  apiLevel?: number | string;
+  packageName: string;
+  rpId: string;
+  origin: string;
+  hasOptions?: boolean;
+  hasCredential?: boolean;
+  errorName?: string;
+  errorCode?: string;
+  errorMessage?: string;
+  errorClass?: string;
+  rawErrorString?: string;
+}
+
+export function logPasskeyDiagnostic(
+  stage: PasskeyDiagnosticEvent['stage'],
+  extra?: Partial<PasskeyDiagnosticEvent> & { err?: any }
+) {
+  const event: PasskeyDiagnosticEvent = {
+    stage,
+    platform: Platform.OS,
+    apiLevel: Platform.OS === 'android' ? Platform.Version : undefined,
+    packageName: 'dev.ytosko.cardnest',
+    rpId: 'cardnest.ytosko.dev',
+    origin: 'https://cardnest.ytosko.dev',
+    hasOptions: extra?.hasOptions,
+    hasCredential: extra?.hasCredential,
+    errorName: extra?.err?.name || extra?.errorName,
+    errorCode: extra?.err?.code || extra?.errorCode,
+    errorMessage: extra?.err?.message || extra?.errorMessage,
+    errorClass: extra?.err?.constructor?.name || extra?.errorClass,
+    rawErrorString: extra?.err ? String(extra.err) : undefined,
+  };
+  console.log('[CardNest Passkey Diagnostic]', JSON.stringify(event, null, 2));
+}
+
 export async function registerPasskey(friendlyName?: string): Promise<PasskeyResult<UserPasskey>> {
+  logPasskeyDiagnostic('registration_start_requested');
   const availability = getPasskeyAvailability();
   if (!availability.isSupported) {
     return {
@@ -210,6 +219,7 @@ export async function registerPasskey(friendlyName?: string): Promise<PasskeyRes
       }
       const { data, error } = await supabase.auth.registerPasskey();
       if (error) {
+        logPasskeyDiagnostic('registration_verify_failed', { err: error });
         return { success: false, error: "Passkey couldn't be created. You can try again or set it up later from Security settings.", code: 'PASSKEY_AUTH_FAILED' };
       }
       await authStorage.setItem('has_device_passkey', 'true');
@@ -225,56 +235,52 @@ export async function registerPasskey(friendlyName?: string): Promise<PasskeyRes
     }
 
     const nativeMod = getNativePasskeysModule();
-<<<<<<< HEAD
     if (!nativeMod) {
+      logPasskeyDiagnostic('native_create_failed', { errorMessage: 'Native module missing' });
       return { success: false, error: 'Passkeys require the Card Nest app version that supports passkeys.', code: 'PASSKEY_NATIVE_MODULE_MISSING' };
-=======
-    if (!nativeMod || !isPasskeySupported()) {
-      return { success: false, error: 'Passkeys require the Card Nest app version that supports passkeys.' };
->>>>>>> 5e7a263056d44fb2e9db9b2b11f445ef343b02db
     }
 
     // Native Mobile Registration (Android Credential Manager / iOS ASAuthorizationController)
     const { data: startData, error: startError } = await supabase.auth.passkey.startRegistration();
     if (startError || !startData) {
+      logPasskeyDiagnostic('native_create_failed', { err: startError || 'Missing start registration payload' });
       return { success: false, error: "Passkey couldn't be created. You can try again or set it up later from Security settings.", code: 'PASSKEY_AUTH_FAILED' };
     }
 
     const challengeId = (startData as any).challengeId || (startData as any).id || '';
     const creationOptions = (startData as any).publicKey || startData;
+    logPasskeyDiagnostic('registration_options_received', { hasOptions: Boolean(creationOptions) });
 
     let credential: any = null;
+    logPasskeyDiagnostic('native_create_started');
     try {
       credential = await nativeMod.create(creationOptions);
+      logPasskeyDiagnostic('native_create_succeeded', { hasCredential: Boolean(credential) });
     } catch (createErr: any) {
+      logPasskeyDiagnostic('native_create_failed', { err: createErr });
       if (isUserCancellation(createErr)) {
-<<<<<<< HEAD
         return { success: false, error: 'Passkey registration was cancelled.', code: 'PASSKEY_CANCELLED', isCancelled: true };
       }
-      return { success: false, error: "Passkey couldn't be created. You can try again or set it up later from Security settings.", code: 'PASSKEY_AUTH_FAILED' };
+      const detailedMessage = createErr?.message ? `Passkey couldn't be created (${createErr.message}).` : "Passkey couldn't be created. You can try again or set it up later from Security settings.";
+      return { success: false, error: detailedMessage, code: 'PASSKEY_AUTH_FAILED' };
     }
 
     if (!credential) {
+      logPasskeyDiagnostic('native_create_failed', { errorMessage: 'No credential object returned' });
       return { success: false, error: 'Passkey registration was cancelled.', code: 'PASSKEY_CANCELLED', isCancelled: true };
-=======
-        return { success: false, error: 'Passkey registration was cancelled.', isCancelled: true };
-      }
-      return { success: false, error: "Passkey couldn't be created. You can try again or set it up later from Security settings." };
     }
 
-    if (!credential) {
-      return { success: false, error: 'Passkey registration was cancelled.', isCancelled: true };
->>>>>>> 5e7a263056d44fb2e9db9b2b11f445ef343b02db
-    }
-
+    logPasskeyDiagnostic('registration_verify_started');
     const { data: verifyData, error: verifyError } = await supabase.auth.passkey.verifyRegistration({
       challengeId,
       credential,
     });
     if (verifyError) {
-      return { success: false, error: 'Passkey verification failed. Please try again.', code: 'PASSKEY_AUTH_FAILED' };
+      logPasskeyDiagnostic('registration_verify_failed', { err: verifyError });
+      return { success: false, error: `Passkey verification failed (${verifyError.message}). Please try again.`, code: 'PASSKEY_AUTH_FAILED' };
     }
 
+    logPasskeyDiagnostic('registration_verify_succeeded');
     await authStorage.setItem('has_device_passkey', 'true');
     await authStorage.setItem('passkey_setup_prompted', 'true');
 
@@ -287,18 +293,17 @@ export async function registerPasskey(friendlyName?: string): Promise<PasskeyRes
       },
     };
   } catch (err: any) {
+    logPasskeyDiagnostic('native_create_failed', { err });
     if (isUserCancellation(err)) {
-<<<<<<< HEAD
       return { success: false, error: 'Passkey registration was cancelled.', code: 'PASSKEY_CANCELLED', isCancelled: true };
-=======
-      return { success: false, error: 'Passkey registration was cancelled.', isCancelled: true };
->>>>>>> 5e7a263056d44fb2e9db9b2b11f445ef343b02db
     }
-    return { success: false, error: "Passkey couldn't be created. You can try again or set it up later from Security settings.", code: 'PASSKEY_AUTH_FAILED' };
+    const detailedMessage = err?.message ? `Passkey couldn't be created (${err.message}).` : "Passkey couldn't be created. You can try again or set it up later from Security settings.";
+    return { success: false, error: detailedMessage, code: 'PASSKEY_AUTH_FAILED' };
   }
 }
 
 export async function signInWithPasskey(): Promise<PasskeyResult<void>> {
+  logPasskeyDiagnostic('authentication_start_requested');
   const availability = getPasskeyAvailability();
   if (!availability.isSupported) {
     return {
@@ -316,9 +321,10 @@ export async function signInWithPasskey(): Promise<PasskeyResult<void>> {
       const { error } = await supabase.auth.signInWithPasskey();
       if (error) {
         if (isNoCredentialsError(error)) {
+          await authStorage.removeItem('has_device_passkey');
           return {
             success: false,
-            error: 'No passkey found for this account on this device. Please sign in with Google or Email first.',
+            error: 'No passkey found on this device. Sign in with Google or email, then add a passkey from Security.',
             code: 'PASSKEY_NOT_REGISTERED',
           };
         }
@@ -328,84 +334,80 @@ export async function signInWithPasskey(): Promise<PasskeyResult<void>> {
     }
 
     const nativeMod = getNativePasskeysModule();
-<<<<<<< HEAD
     if (!nativeMod) {
+      logPasskeyDiagnostic('native_get_failed', { errorMessage: 'Native module missing' });
       return { success: false, error: 'Passkeys require the Card Nest app version that supports passkeys.', code: 'PASSKEY_NATIVE_MODULE_MISSING' };
-=======
-    if (!nativeMod || !isPasskeySupported()) {
-      return { success: false, error: 'Passkeys require the Card Nest app version that supports passkeys.' };
->>>>>>> 5e7a263056d44fb2e9db9b2b11f445ef343b02db
     }
 
     // Native Mobile Authentication (Android Credential Manager / iOS ASAuthorizationController)
     const { data: startData, error: startError } = await supabase.auth.passkey.startAuthentication();
     if (startError || !startData) {
+      logPasskeyDiagnostic('native_get_failed', { err: startError || 'Missing start authentication payload' });
       return { success: false, error: startError?.message || 'Failed to initiate passkey sign-in.', code: 'PASSKEY_AUTH_FAILED' };
     }
 
     const challengeId = (startData as any).challengeId || (startData as any).id || '';
     const requestOptions = (startData as any).publicKey || startData;
+    logPasskeyDiagnostic('authentication_options_received', { hasOptions: Boolean(requestOptions) });
 
     let assertion: any = null;
+    logPasskeyDiagnostic('native_get_started');
     try {
       assertion = await nativeMod.get(requestOptions);
+      logPasskeyDiagnostic('native_get_succeeded', { hasCredential: Boolean(assertion) });
     } catch (getErr: any) {
+      logPasskeyDiagnostic('native_get_failed', { err: getErr });
       if (isUserCancellation(getErr)) {
-<<<<<<< HEAD
         return { success: false, error: 'Passkey sign-in was cancelled.', code: 'PASSKEY_CANCELLED', isCancelled: true };
       }
       if (isNoCredentialsError(getErr)) {
+        await authStorage.removeItem('has_device_passkey');
         return {
           success: false,
-          error: 'No passkey found for this account on this device. Please sign in with Google or Email first, then create a passkey in Security settings.',
+          error: 'No passkey found on this device. Sign in with Google or email, then add a passkey from Security.',
           code: 'PASSKEY_NOT_REGISTERED',
         };
       }
+      const detailedMessage = getErr?.message ? `Passkey sign-in failed (${getErr.message}). Please try signing in with Google or Email.` : 'Passkey sign-in failed. Please try signing in with Google or Email.';
       return {
         success: false,
-        error: 'Passkey sign-in failed. Please try signing in with Google or Email.',
+        error: detailedMessage,
         code: 'PASSKEY_AUTH_FAILED',
       };
     }
 
     if (!assertion) {
+      logPasskeyDiagnostic('native_get_failed', { errorMessage: 'No assertion returned' });
       return { success: false, error: 'Passkey sign-in was cancelled.', code: 'PASSKEY_CANCELLED', isCancelled: true };
-=======
-        return { success: false, error: 'Passkey sign-in was cancelled.', isCancelled: true };
-      }
-      return { success: false, error: 'Passkey sign-in failed. Please try signing in with Google or Email.' };
     }
 
-    if (!assertion) {
-      return { success: false, error: 'Passkey sign-in was cancelled.', isCancelled: true };
->>>>>>> 5e7a263056d44fb2e9db9b2b11f445ef343b02db
-    }
-
+    logPasskeyDiagnostic('authentication_verify_started');
     const { error: verifyError } = await supabase.auth.passkey.verifyAuthentication({
       challengeId,
       credential: assertion,
     });
     if (verifyError) {
+      logPasskeyDiagnostic('authentication_verify_failed', { err: verifyError });
       return { success: false, error: verifyError.message || 'Passkey authentication failed.', code: 'PASSKEY_AUTH_FAILED' };
     }
 
+    logPasskeyDiagnostic('authentication_verify_succeeded');
     return { success: true, data: undefined };
   } catch (err: any) {
+    logPasskeyDiagnostic('native_get_failed', { err });
     if (isUserCancellation(err)) {
-<<<<<<< HEAD
       return { success: false, error: 'Passkey sign-in was cancelled.', code: 'PASSKEY_CANCELLED', isCancelled: true };
-=======
-      return { success: false, error: 'Passkey sign-in was cancelled.', isCancelled: true };
->>>>>>> 5e7a263056d44fb2e9db9b2b11f445ef343b02db
     }
     if (isNoCredentialsError(err)) {
+      await authStorage.removeItem('has_device_passkey');
       return {
         success: false,
-        error: 'No passkey found for this account on this device. Please sign in with Google or Email first, then create a passkey in Security settings.',
+        error: 'No passkey found on this device. Sign in with Google or email, then add a passkey from Security.',
         code: 'PASSKEY_NOT_REGISTERED',
       };
     }
-    return { success: false, error: 'Passkey sign-in failed. Please try signing in with Google or Email.', code: 'PASSKEY_AUTH_FAILED' };
+    const detailedMessage = err?.message ? `Passkey sign-in failed (${err.message}). Please try signing in with Google or Email.` : 'Passkey sign-in failed. Please try signing in with Google or Email.';
+    return { success: false, error: detailedMessage, code: 'PASSKEY_AUTH_FAILED' };
   }
 }
 

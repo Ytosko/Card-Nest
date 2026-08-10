@@ -1,11 +1,12 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  FlatList,
+  ScrollView,
   StyleSheet,
+  Switch,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -20,13 +21,29 @@ import {
   renamePasskey,
   type UserPasskey,
 } from '@/src/features/auth/passkey-service';
+import { useSecurity } from '@/src/features/security/security-provider';
+import {
+  hasLocalBiometricHardware,
+  setAutoLockTimeout,
+  setBiometricEnabled,
+  type AutoLockTimeout,
+} from '@/src/features/security/security-storage';
 import { useAppTheme } from '@/src/theme/theme-provider';
 
 export default function SecuritySettingsScreen() {
   const theme = useAppTheme();
+  const router = useRouter();
+  const {
+    unlockMethod,
+    autoLockTimeout,
+    biometricEnabled,
+    refreshSecurityState,
+  } = useSecurity();
+
   const [passkeys, setPasskeys] = useState<UserPasskey[]>([]);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
+  const [hasBioHardware, setHasBioHardware] = useState(false);
 
   const fetchPasskeys = useCallback(async () => {
     setLoading(true);
@@ -39,14 +56,17 @@ export default function SecuritySettingsScreen() {
 
   useEffect(() => {
     void fetchPasskeys();
+    void (async () => {
+      setHasBioHardware(await hasLocalBiometricHardware());
+    })();
   }, [fetchPasskeys]);
 
   async function handleAddPasskey() {
     setAdding(true);
-    const res = await registerPasskey('Card Nest Security Passkey');
+    const res = await registerPasskey('Card Nest Account Passkey');
     setAdding(false);
     if (res.success) {
-      Alert.alert('Passkey Added', 'New passkey registered successfully.');
+      Alert.alert('Passkey Added', 'New account passkey registered successfully.');
       void fetchPasskeys();
     } else {
       Alert.alert("Passkey couldn't be created", res.error);
@@ -75,7 +95,7 @@ export default function SecuritySettingsScreen() {
         },
       ],
       'plain-text',
-      passkey.name,
+      passkey.name
     );
   }
 
@@ -104,82 +124,194 @@ export default function SecuritySettingsScreen() {
     ]);
   }
 
+  async function handleAutoLockChange(timeout: AutoLockTimeout) {
+    await setAutoLockTimeout(timeout);
+    await refreshSecurityState();
+  }
+
+  async function handleBiometricToggle(enabled: boolean) {
+    await setBiometricEnabled(enabled);
+    await refreshSecurityState();
+  }
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      <Stack.Screen options={{ title: 'Security & Passkeys', headerShown: true }} />
-      <View style={styles.header}>
-        <AppText variant="title">Passkeys</AppText>
-        <AppText muted variant="caption">
-          Sign in quickly with fingerprint, face unlock, device PIN, or hardware key.
-        </AppText>
-      </View>
+      <Stack.Screen options={{ title: 'Security & App Lock', headerShown: true }} />
 
-      {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator color={theme.colors.primary} size="large" />
-        </View>
-      ) : (
-        <FlatList
-          data={passkeys}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.listContent}
-          ListEmptyComponent={
-            <View style={[styles.emptyCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
-              <MaterialCommunityIcons name="fingerprint-off" size={36} color={theme.colors.textMuted} />
-              <AppText variant="label">No passkeys registered</AppText>
-              <AppText muted variant="caption" style={{ textAlign: 'center' }}>
-                Add a passkey to enable fast, passwordless biometric sign-in on your devices.
-              </AppText>
-            </View>
-          }
-          renderItem={({ item }) => (
-            <View style={[styles.passkeyCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
-              <View style={styles.passkeyLeft}>
-                <MaterialCommunityIcons name="fingerprint" size={28} color={theme.colors.primary} />
+      <ScrollView contentContainerStyle={styles.scrollContent}>
+        {/* SECTION 1: APP LOCK (THIS DEVICE) */}
+        <View style={styles.section}>
+          <AppText variant="title">App Lock (This Device)</AppText>
+          <AppText muted variant="caption">
+            Protect Card Nest when launching or returning to the app on this device.
+          </AppText>
+
+          <View style={[styles.card, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
+            <View style={styles.row}>
+              <View style={styles.rowLeft}>
+                <MaterialCommunityIcons
+                  name={unlockMethod === 'passkey' ? 'fingerprint' : 'shield-lock'}
+                  size={24}
+                  color={theme.colors.primary}
+                />
                 <View>
-                  <AppText variant="label">{item.name}</AppText>
+                  <AppText variant="label">Current Unlock Method</AppText>
                   <AppText muted variant="caption">
-                    Created {new Date(item.createdAt).toLocaleDateString()}
+                    {unlockMethod === 'passkey'
+                      ? 'Passkey (Biometrics / Platform Passkey)'
+                      : unlockMethod === 'pin'
+                      ? '6-digit Card Nest PIN'
+                      : 'Unconfigured'}
                   </AppText>
-                  {item.lastUsedAt ? (
-                    <AppText muted variant="caption">
-                      Last used {new Date(item.lastUsedAt).toLocaleDateString()}
-                    </AppText>
-                  ) : null}
                 </View>
               </View>
-              <View style={styles.passkeyActions}>
-                <TouchableOpacity style={styles.actionBtn} onPress={() => handleRename(item)}>
-                  <MaterialCommunityIcons name="pencil-outline" size={20} color={theme.colors.text} />
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.actionBtn} onPress={() => handleDelete(item)}>
-                  <MaterialCommunityIcons name="trash-can-outline" size={20} color={theme.colors.danger} />
-                </TouchableOpacity>
+            </View>
+
+            <AppButton
+              variant="secondary"
+              onPress={() => router.push('/(app)/security-setup')}
+              style={{ marginTop: 8 }}
+            >
+              Change Unlock Method / Reset PIN
+            </AppButton>
+          </View>
+
+          {hasBioHardware ? (
+            <View style={[styles.card, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
+              <View style={styles.row}>
+                <View style={styles.rowLeft}>
+                  <MaterialCommunityIcons name="face-recognition" size={24} color={theme.colors.primary} />
+                  <View style={{ flex: 1 }}>
+                    <AppText variant="label">Biometric Convenience</AppText>
+                    <AppText muted variant="caption">
+                      Use fingerprint or face unlock as a convenience fallback for PIN unlock on this device.
+                    </AppText>
+                  </View>
+                </View>
+                <Switch
+                  value={biometricEnabled}
+                  onValueChange={(val) => void handleBiometricToggle(val)}
+                  trackColor={{ false: theme.colors.border, true: theme.colors.primary }}
+                />
               </View>
             </View>
-          )}
-        />
-      )}
+          ) : null}
 
-      <View style={styles.footer}>
-        <AppButton loading={adding} onPress={() => void handleAddPasskey()}>
-          <MaterialCommunityIcons name="plus" size={20} color="#fff" style={{ marginRight: 6 }} />
-          Add passkey
-        </AppButton>
-      </View>
+          {/* AUTO-LOCK TIMEOUT SELECTOR */}
+          <View style={[styles.card, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
+            <AppText variant="label" style={{ marginBottom: 4 }}>Auto-Lock Timing</AppText>
+            <AppText muted variant="caption" style={{ marginBottom: 12 }}>
+              Automatically lock Card Nest after background inactivity.
+            </AppText>
+
+            <View style={styles.timeoutGrid}>
+              {(['immediately', '1m', '5m', '15m'] as AutoLockTimeout[]).map((t) => {
+                const isSelected = autoLockTimeout === t;
+                const labelMap = { immediately: 'Immediately', '1m': '1 min', '5m': '5 min', '15m': '15 min' };
+                return (
+                  <TouchableOpacity
+                    key={t}
+                    style={[
+                      styles.timeoutOption,
+                      {
+                        borderColor: isSelected ? theme.colors.primary : theme.colors.border,
+                        backgroundColor: isSelected ? theme.colors.primary + '15' : 'transparent',
+                      },
+                    ]}
+                    onPress={() => void handleAutoLockChange(t)}
+                  >
+                    <AppText
+                      style={{
+                        fontSize: 13,
+                        fontWeight: isSelected ? '700' : '400',
+                        color: isSelected ? theme.colors.primary : theme.colors.text,
+                      }}
+                    >
+                      {labelMap[t]}
+                    </AppText>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        </View>
+
+        {/* SECTION 2: ACCOUNT PASSKEYS */}
+        <View style={styles.section}>
+          <AppText variant="title">Account Sign-In Passkeys</AppText>
+          <AppText muted variant="caption">
+            Passkeys registered to your Card Nest account across all your devices.
+          </AppText>
+
+          {loading ? (
+            <ActivityIndicator color={theme.colors.primary} style={{ marginVertical: 16 }} />
+          ) : (
+            <View style={{ gap: 12 }}>
+              {passkeys.length === 0 ? (
+                <View style={[styles.emptyCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
+                  <MaterialCommunityIcons name="fingerprint-off" size={32} color={theme.colors.textMuted} />
+                  <AppText variant="label">No account passkeys registered</AppText>
+                  <AppText muted variant="caption" style={{ textAlign: 'center' }}>
+                    Add a passkey to sign in to your Card Nest account without passwords.
+                  </AppText>
+                </View>
+              ) : (
+                passkeys.map((item) => (
+                  <View
+                    key={item.id}
+                    style={[styles.card, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}
+                  >
+                    <View style={styles.row}>
+                      <View style={styles.rowLeft}>
+                        <MaterialCommunityIcons name="fingerprint" size={24} color={theme.colors.primary} />
+                        <View>
+                          <AppText variant="label">{item.name}</AppText>
+                          <AppText muted variant="caption">
+                            Created {new Date(item.createdAt).toLocaleDateString()}
+                          </AppText>
+                        </View>
+                      </View>
+                      <View style={styles.actions}>
+                        <TouchableOpacity style={styles.actionIcon} onPress={() => handleRename(item)}>
+                          <MaterialCommunityIcons name="pencil-outline" size={20} color={theme.colors.text} />
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.actionIcon} onPress={() => handleDelete(item)}>
+                          <MaterialCommunityIcons name="trash-can-outline" size={20} color={theme.colors.danger} />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  </View>
+                ))
+              )}
+
+              <AppButton loading={adding} onPress={() => void handleAddPasskey()}>
+                <MaterialCommunityIcons name="plus" size={18} color="#fff" style={{ marginRight: 6 }} />
+                Add Account Passkey
+              </AppButton>
+            </View>
+          )}
+        </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  actionBtn: { padding: 6 },
-  center: { alignItems: 'center', flex: 1, justifyContent: 'center' },
-  container: { flex: 1, padding: 16 },
-  emptyCard: { alignItems: 'center', borderRadius: 16, borderWidth: 1, gap: 8, padding: 24 },
-  footer: { marginTop: 12, width: '100%' },
-  header: { gap: 4, marginBottom: 16 },
-  listContent: { gap: 12, paddingBottom: 24 },
-  passkeyActions: { flexDirection: 'row', gap: 4 },
-  passkeyCard: { alignItems: 'center', borderRadius: 16, borderWidth: 1, flexDirection: 'row', justifyContent: 'space-between', padding: 16 },
-  passkeyLeft: { alignItems: 'center', flexDirection: 'row', gap: 12 },
+  container: { flex: 1 },
+  scrollContent: { padding: 16, gap: 24, paddingBottom: 40 },
+  section: { gap: 8 },
+  card: { padding: 16, borderRadius: 16, borderWidth: 1, gap: 8 },
+  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  rowLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
+  actions: { flexDirection: 'row', gap: 8 },
+  actionIcon: { padding: 4 },
+  emptyCard: { alignItems: 'center', borderRadius: 16, borderWidth: 1, gap: 8, padding: 20 },
+  timeoutGrid: { flexDirection: 'row', gap: 8, justifyContent: 'space-between' },
+  timeoutOption: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: 'center',
+    borderRadius: 10,
+    borderWidth: 1.5,
+  },
 });

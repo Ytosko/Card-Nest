@@ -1,15 +1,21 @@
 import Constants from 'expo-constants';
 import * as FileSystem from 'expo-file-system';
 import * as IntentLauncher from 'expo-intent-launcher';
+import * as Updates from 'expo-updates';
 import { Platform } from 'react-native';
 
 export interface VersionInfo {
   versionName: string;
   versionCode: number;
+  otaRuntimeVersion?: string;
+  otaChannel?: string;
+  otaUpdateId?: string;
 }
 
 export interface UpdateCheckResult {
   isUpdateAvailable: boolean;
+  isOtaAvailable?: boolean;
+  isOtaDownloaded?: boolean;
   currentVersion: VersionInfo;
   latestVersion?: {
     versionName: string;
@@ -25,11 +31,14 @@ export interface UpdateCheckResult {
 const GITHUB_RELEASES_API = 'https://api.github.com/repos/Ytosko/Card-Nest/releases/latest';
 
 export function getCurrentVersionInfo(): VersionInfo {
-  const configVersion = Constants.expoConfig?.version || '0.1.3-alpha-c9085';
-  const configVersionCode = Constants.expoConfig?.android?.versionCode || 5;
+  const configVersion = Constants.expoConfig?.version || '0.1.4-alpha-d7102';
+  const configVersionCode = Constants.expoConfig?.android?.versionCode || 6;
   return {
     versionName: configVersion,
     versionCode: configVersionCode,
+    otaRuntimeVersion: Updates.runtimeVersion || undefined,
+    otaChannel: Updates.channel || 'alpha',
+    otaUpdateId: Updates.updateId || undefined,
   };
 }
 
@@ -53,14 +62,44 @@ export function isNewerVersion(current: VersionInfo, latestTag: string, latestNo
 let cachedCheck: UpdateCheckResult | null = null;
 let lastCheckTime = 0;
 
+export async function checkForOtaUpdate(): Promise<{ isAvailable: boolean; isDownloaded: boolean; error?: string }> {
+  if (__DEV__ || Platform.OS === 'web') {
+    return { isAvailable: false, isDownloaded: false };
+  }
+  try {
+    const check = await Updates.checkForUpdateAsync();
+    if (check.isAvailable) {
+      const fetchResult = await Updates.fetchUpdateAsync();
+      return { isAvailable: true, isDownloaded: fetchResult.isNew };
+    }
+    return { isAvailable: false, isDownloaded: false };
+  } catch (err: any) {
+    return { isAvailable: false, isDownloaded: false, error: err?.message };
+  }
+}
+
+export async function applyOtaUpdate(): Promise<void> {
+  if (Platform.OS === 'web' || __DEV__) return;
+  try {
+    await Updates.reloadAsync();
+  } catch {
+    // Graceful fallback
+  }
+}
+
 export async function checkForAppUpdate(force = false): Promise<UpdateCheckResult> {
   const now = Date.now();
-  // Throttle automatic network checks to once every 10 minutes unless forced
   if (!force && cachedCheck && now - lastCheckTime < 10 * 60 * 1000) {
     return cachedCheck;
   }
 
   const current = getCurrentVersionInfo();
+  let otaStatus = { isAvailable: false, isDownloaded: false };
+
+  if (!__DEV__ && Platform.OS !== 'web') {
+    otaStatus = await checkForOtaUpdate();
+  }
+
   try {
     const response = await fetch(GITHUB_RELEASES_API, {
       headers: {
@@ -82,7 +121,9 @@ export async function checkForAppUpdate(force = false): Promise<UpdateCheckResul
     const available = isNewerVersion(current, latestTag, releaseNotes);
 
     cachedCheck = {
-      isUpdateAvailable: available,
+      isUpdateAvailable: available || otaStatus.isAvailable,
+      isOtaAvailable: otaStatus.isAvailable,
+      isOtaDownloaded: otaStatus.isDownloaded,
       currentVersion: current,
       latestVersion: {
         versionName: latestTag.replace(/^v/u, ''),
@@ -97,7 +138,9 @@ export async function checkForAppUpdate(force = false): Promise<UpdateCheckResul
     return cachedCheck;
   } catch (err: any) {
     return {
-      isUpdateAvailable: false,
+      isUpdateAvailable: otaStatus.isAvailable,
+      isOtaAvailable: otaStatus.isAvailable,
+      isOtaDownloaded: otaStatus.isDownloaded,
       currentVersion: current,
       checkedAt: new Date().toISOString(),
       error: err?.message || 'Network unavailable',

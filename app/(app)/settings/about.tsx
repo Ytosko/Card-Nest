@@ -16,6 +16,7 @@ import { BrandMark } from '@/src/components/brand-mark';
 import { AppButton } from '@/src/components/ui/app-button';
 import { AppText } from '@/src/components/ui/app-text';
 import {
+  applyOtaUpdate,
   checkForAppUpdate,
   downloadAndInstallApk,
   getCurrentVersionInfo,
@@ -45,8 +46,13 @@ export default function AboutScreen() {
   }, [runUpdateCheck]);
 
   async function handleInstallUpdate() {
+    if (updateResult?.isOtaDownloaded) {
+      await applyOtaUpdate();
+      return;
+    }
+
     if (!updateResult?.latestVersion?.apkUrl) {
-      Alert.alert('Update Unavailable', 'No release APK found for this update.');
+      Alert.alert('Update Unavailable', 'No release package found for this update.');
       return;
     }
 
@@ -87,6 +93,11 @@ export default function AboutScreen() {
               <AppText muted variant="caption">
                 {currentVersion.versionName} (build {currentVersion.versionCode})
               </AppText>
+              {currentVersion.otaRuntimeVersion ? (
+                <AppText muted variant="caption">
+                  OTA Channel: {currentVersion.otaChannel || 'alpha'} · Runtime: {currentVersion.otaRuntimeVersion}
+                </AppText>
+              ) : null}
             </View>
           </View>
         </View>
@@ -110,14 +121,18 @@ export default function AboutScreen() {
                 <AppText variant="label">
                   {checking
                     ? 'Checking for updates…'
-                    : updateResult?.isUpdateAvailable
-                      ? `Update Available — ${updateResult.latestVersion?.versionName}`
-                      : 'Card Nest is up to date'}
+                    : updateResult?.isOtaDownloaded
+                      ? 'OTA Update Downloaded — Ready to Restart'
+                      : updateResult?.isUpdateAvailable
+                        ? `Update Available — ${updateResult.latestVersion?.versionName}`
+                        : 'Card Nest is up to date'}
                 </AppText>
                 <AppText muted variant="caption">
-                  {updateResult?.isUpdateAvailable
-                    ? 'A newer official alpha release is ready for installation.'
-                    : "You're using the latest available release."}
+                  {updateResult?.isOtaDownloaded
+                    ? 'A new over-the-air update is ready to be applied.'
+                    : updateResult?.isUpdateAvailable
+                      ? 'A newer release is ready for installation.'
+                      : "You're using the latest release with compatible OTA support."}
                 </AppText>
               </View>
             </View>
@@ -127,13 +142,19 @@ export default function AboutScreen() {
           {updateResult?.isUpdateAvailable ? (
             <View style={styles.updateActions}>
               <AppButton loading={downloading} onPress={() => void handleInstallUpdate()}>
-                {downloading ? `Downloading (${downloadPercent}%)` : 'Update app'}
+                {updateResult.isOtaDownloaded
+                  ? 'Restart App to Update'
+                  : downloading
+                    ? `Downloading (${downloadPercent}%)`
+                    : 'Update App'}
               </AppButton>
-              <TouchableOpacity style={styles.changelogBtn} onPress={() => setShowChangelog(true)}>
-                <AppText variant="caption" style={{ color: theme.colors.primary, fontWeight: '600' }}>
-                  What’s new
-                </AppText>
-              </TouchableOpacity>
+              {updateResult.latestVersion?.releaseNotes ? (
+                <TouchableOpacity style={styles.changelogBtn} onPress={() => setShowChangelog(true)}>
+                  <AppText variant="caption" style={{ color: theme.colors.primary, fontWeight: '600' }}>
+                    What’s new
+                  </AppText>
+                </TouchableOpacity>
+              ) : null}
             </View>
           ) : (
             <View style={{ marginTop: 12 }}>
@@ -168,7 +189,7 @@ export default function AboutScreen() {
             </ScrollView>
             <View style={styles.modalFooter}>
               <AppButton onPress={() => { setShowChangelog(false); void handleInstallUpdate(); }}>
-                Update app
+                Update App
               </AppButton>
             </View>
           </View>
