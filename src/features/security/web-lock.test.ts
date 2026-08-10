@@ -13,7 +13,7 @@ describe('browser-specific web lock', () => {
   });
 
   it('derives a salted verifier and verifies without storing the PIN', async () => {
-    const config = await createWebLockConfig('246810', '1m');
+    const config = await createWebLockConfig('246810', '1h');
     expect(config.verifier).not.toContain('246810');
     expect(config.salt.length).toBeGreaterThan(10);
     await expect(verifyWebPin('246810', config)).resolves.toMatchObject({ ok: true, config: { failedAttempts: 0 } });
@@ -31,10 +31,10 @@ describe('browser-specific web lock', () => {
     vi.useRealTimers();
   });
 
-  it('maps every supported inactivity setting', () => {
-    expect(timeoutMilliseconds('immediately')).toBe(0);
-    expect(timeoutMilliseconds('1m')).toBe(60_000);
-    expect(timeoutMilliseconds('5m')).toBe(300_000);
-    expect(timeoutMilliseconds('15m')).toBe(900_000);
+  it('maps every supported web unlock setting', () => {
+    expect(timeoutMilliseconds('restart')).toBe(Number.POSITIVE_INFINITY);
+    expect(timeoutMilliseconds('1h')).toBe(60 * 60 * 1000);
+    expect(timeoutMilliseconds('6h')).toBe(6 * 60 * 60 * 1000);
+    expect(timeoutMilliseconds('12h')).toBe(12 * 60 * 60 * 1000);
   });
 });

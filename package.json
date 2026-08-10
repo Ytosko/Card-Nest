@@ -1,7 +1,7 @@
 {
   "name": "cardnest",
   "main": "expo-router/entry",
-  "version": "0.1.6-alpha-f81b4",
+  "version": "1.0.1-beta-f0D1X",
   "scripts": {
     "start": "expo start",
     "android": "expo run:android",

@@ -3,7 +3,7 @@
     "name": "Card Nest",
     "slug": "cardnest",
     "description": "Scan, organize, and safely back up the business cards worth keeping.",
-    "version": "0.1.6-alpha-f81b4",
+    "version": "1.0.1-beta-f0D1X",
     "orientation": "portrait",
     "icon": "./assets/images/cardnest-icon.png",
     "scheme": "cardnest",
@@ -23,14 +23,14 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "dev.ytosko.cardnest",
-      "buildNumber": "9",
+      "buildNumber": "10",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
       "package": "dev.ytosko.cardnest",
-      "versionCode": 9,
+      "versionCode": 10,
       "adaptiveIcon": {
         "backgroundColor": "#0CC0DF",
         "foregroundImage": "./assets/images/cardnest-adaptive-foreground.png"

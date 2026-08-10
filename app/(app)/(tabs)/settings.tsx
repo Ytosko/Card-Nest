@@ -1,4 +1,5 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -13,6 +14,7 @@ export default function SettingsScreen() {
   const theme = useAppTheme();
   const router = useRouter();
   const { profile, user } = useAuth();
+  const appVersion = Constants.expoConfig?.version ?? '1.0.1-beta-f0D1X';
 
   return (
     <SafeAreaView edges={['top']} style={[styles.safeArea, { backgroundColor: theme.colors.background }]}>
@@ -50,7 +52,7 @@ export default function SettingsScreen() {
         <SettingsGroup title="Card Nest">
           <SettingsRow icon="shield-lock-outline" label="Privacy" onPress={() => router.push('/(app)/settings/legal?document=privacy')} />
           <SettingsRow icon="file-document-outline" label="Terms" onPress={() => router.push('/(app)/settings/legal?document=terms')} />
-          <SettingsRow icon="information-outline" label="About" onPress={() => router.push('/(app)/settings/about')} value="Version 1.0.0" />
+          <SettingsRow icon="information-outline" label="About" onPress={() => router.push('/(app)/settings/about')} value={`Version ${appVersion}`} />
         </SettingsGroup>
       </ScrollView>
     </SafeAreaView>

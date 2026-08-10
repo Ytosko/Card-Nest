@@ -1,5 +1,5 @@
 import path from 'path';
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 
 export default defineConfig({
   define: {
@@ -9,6 +9,7 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
+    exclude: [...configDefaults.exclude, 'web/**'],
   },
   resolve: {
     alias: {
