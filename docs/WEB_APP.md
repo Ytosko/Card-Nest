@@ -17,6 +17,12 @@ The production Next.js application in `web/` serves both the public Card Nest we
 
 All private reads and writes use the same hosted Supabase users, schema, RLS policies, and private Storage buckets as the mobile application. No service-role key is present in the Next.js runtime.
 
+## Web authentication boundary
+
+Google web OAuth returns to `https://cardnest.ytosko.dev/auth/callback?next=/app`. That callback is a Next.js Route Handler so Supabase can exchange the PKCE code and write the browser session cookies before redirecting. The allow-listed `next` value accepts only `/app` routes and never emits a mobile deep link. Android/mobile Google OAuth remains isolated at `/gauth/callback`, which retains the existing `cardnest://` relay.
+
+Next.js `proxy.ts` refreshes expiring Supabase sessions before private Server Components run, forwarding rotated cookies to the request and browser response with private/no-store cache headers. The private layout then waits for the server-side `getUser()` check. A genuinely missing or invalid session returns to login; a transient Auth/network failure produces a retry state without destroying the cookie session. Once authenticated, the browser PIN gate displays its own loading state while reading local storage, then shows setup for a new browser or unlock for a returning browser.
+
 ## Browser app lock
 
 After a successful account login, each browser must create its own six-digit PIN. The plaintext PIN is never persisted or synchronized. Card Nest generates a random 128-bit salt and derives a verifier with PBKDF2-SHA-256 at 210,000 iterations through Web Crypto. Local storage contains only the versioned salt, verifier, timeout, and retry state under a per-user key.

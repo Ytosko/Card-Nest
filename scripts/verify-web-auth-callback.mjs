@@ -43,34 +43,38 @@ try {
   const tokenHash = data.properties.hashed_token;
   if (!tokenHash) throw new Error('Supabase did not return a signup token hash.');
 
-  const firstResponse = await fetch(`${origin}/api/auth/verify`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tokenHash, type: 'signup' }),
-  });
-  const firstResult = await firstResponse.json();
+  const callbackUrl = `${origin}/auth/callback?token_hash=${encodeURIComponent(tokenHash)}&type=signup&next=%2Fapp`;
+  const firstResponse = await fetch(callbackUrl, { redirect: 'manual' });
+  const setCookies = typeof firstResponse.headers.getSetCookie === 'function'
+    ? firstResponse.headers.getSetCookie()
+    : [firstResponse.headers.get('set-cookie')].filter(Boolean);
 
-  if (
-    !firstResponse.ok ||
-    !firstResult.ok ||
-    firstResult.flowType !== 'signup' ||
-    !firstResult.session?.accessToken ||
-    !firstResult.session?.refreshToken
-  ) {
-    throw new Error(`First-party callback verification returned HTTP ${firstResponse.status}.`);
+  if (firstResponse.status !== 303 || setCookies.length === 0) {
+    throw new Error(`First-party callback did not persist a session; received HTTP ${firstResponse.status}.`);
   }
 
-  const reuseResponse = await fetch(`${origin}/api/auth/verify`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tokenHash, type: 'signup' }),
-  });
-
-  if (reuseResponse.status !== 400) {
-    throw new Error(`Used token was not rejected; received HTTP ${reuseResponse.status}.`);
+  const destination = new URL(firstResponse.headers.get('location') ?? '/', origin);
+  if (destination.pathname !== '/app') {
+    throw new Error('First-party callback did not route the verified session to /app.');
   }
 
-  console.log('First-party Card Nest callback verified a real signup token and rejected its reuse.');
+  const cookieHeader = setCookies.map((value) => value.split(';', 1)[0]).join('; ');
+  const appResponse = await fetch(`${origin}/app`, {
+    headers: { Cookie: cookieHeader },
+    redirect: 'manual',
+  });
+  const appHtml = await appResponse.text();
+  if (appResponse.status !== 200 || !appHtml.includes('Securing your Card Nest')) {
+    throw new Error(`The persisted callback session did not pass the /app route guard; received HTTP ${appResponse.status}.`);
+  }
+
+  const reuseResponse = await fetch(callbackUrl, { redirect: 'manual' });
+  const reuseDestination = new URL(reuseResponse.headers.get('location') ?? '/', origin);
+  if (reuseResponse.status !== 303 || reuseDestination.pathname !== '/auth') {
+    throw new Error(`Used token was not rejected by the callback; received HTTP ${reuseResponse.status}.`);
+  }
+
+  console.log('First-party Card Nest callback persisted a real session, passed the /app guard, and rejected token reuse.');
 } finally {
   if (testUserId) {
     const { error } = await admin.auth.admin.deleteUser(testUserId);

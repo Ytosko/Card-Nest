@@ -19,7 +19,7 @@ export function AppShell({ children, displayName, email }: { children: React.Rea
   const pathname = usePathname();
   return <div className="app-frame">
     <aside className="app-sidebar">
-      <Link href="/app" className="app-logo"><Brand /></Link>
+      <Brand className="app-logo" href="/app" />
       <nav aria-label="Card Nest workspace">{navigation.map(({ href, label, icon: Icon }) => {
         const active = href === '/app' ? pathname === href : pathname.startsWith(href);
         return <Link className={`app-nav-link ${active ? 'active' : ''}`} href={href} key={href}><Icon aria-hidden size={20} /><span>{label}</span></Link>;

@@ -16,7 +16,7 @@ export async function saveProfile(formData: FormData) {
 export async function requestEmailChange(formData: FormData) {
   const { supabase, user } = await requireWebUser(); if (!user) redirect('/auth');
   const email = String(formData.get('email') ?? '').trim().toLowerCase();
-  const { error } = await supabase.auth.updateUser({ email }, { emailRedirectTo: 'https://cardnest.ytosko.dev/auth/callback?mode=web' });
+  const { error } = await supabase.auth.updateUser({ email }, { emailRedirectTo: 'https://cardnest.ytosko.dev/auth/callback?next=%2Fapp%2Fsettings%2Fprofile' });
   if (error) redirect(`/app/settings/profile?message=${encodeURIComponent(error.message)}`);
   redirect('/app/settings/profile?message=Approval+emails+sent.+Confirm+the+change+from+both+addresses.');
 }

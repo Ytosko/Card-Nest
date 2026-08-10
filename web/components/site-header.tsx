@@ -120,10 +120,10 @@ export function SiteHeader() {
                 </Link>
               ))}
               <Link
-                className="focus-ring mt-2 flex min-h-12 items-center justify-center rounded-xl bg-[#0CC0DF] px-4 text-base font-bold text-[#052f36] transition hover:bg-[#08afcb]"
+                className="homepage-login-cta focus-ring mt-2 flex min-h-12 items-center justify-center rounded-xl bg-[#079cb8] px-4 text-base font-bold transition hover:bg-[#067a90]"
                 href="/auth?mode=signin"
                 onClick={closeMenu}>
-                Log in to web app
+                Log in to Web App
               </Link>
             </nav>
           </div>

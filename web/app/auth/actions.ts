@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 
 const productionOrigin = 'https://cardnest.ytosko.dev';
+const webAppCallback = `${productionOrigin}/auth/callback?next=%2Fapp`;
 
 function authUrl(mode: string, message?: string) {
   const params = new URLSearchParams({ mode });
@@ -17,7 +18,7 @@ export async function signIn(formData: FormData) {
   const password = String(formData.get('password') ?? '');
   if (!email || !password) redirect(authUrl('signin', 'Enter your email address and password.'));
 
-  const supabase = await createServerSupabaseClient();
+  const supabase = await createServerSupabaseClient({ requireCookieWrites: true });
   const { error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) {
     const message = error.message.toLowerCase().includes('invalid login')
@@ -38,12 +39,12 @@ export async function signUp(formData: FormData) {
     redirect(authUrl('signup', 'Use a valid email address and a password with at least 8 characters.'));
   }
 
-  const supabase = await createServerSupabaseClient();
+  const supabase = await createServerSupabaseClient({ requireCookieWrites: true });
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
     options: {
-      emailRedirectTo: `${productionOrigin}/auth/callback?mode=web`,
+      emailRedirectTo: webAppCallback,
       data: { display_name: displayName || null },
     },
   });
@@ -53,10 +54,10 @@ export async function signUp(formData: FormData) {
 }
 
 export async function startGoogleSignIn() {
-  const supabase = await createServerSupabaseClient();
+  const supabase = await createServerSupabaseClient({ requireCookieWrites: true });
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
-    options: { redirectTo: `${productionOrigin}/auth/callback?mode=web`, skipBrowserRedirect: true },
+    options: { redirectTo: webAppCallback, skipBrowserRedirect: true },
   });
   if (error || !data.url) redirect(authUrl('signin', 'Google sign-in could not be started.'));
   redirect(data.url);
@@ -65,8 +66,8 @@ export async function startGoogleSignIn() {
 export async function sendPasswordReset(formData: FormData) {
   const email = String(formData.get('email') ?? '').trim().toLowerCase();
   if (!email) redirect('/auth/forgot?message=Enter+your+email+address.');
-  const supabase = await createServerSupabaseClient();
-  await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${productionOrigin}/auth/callback?mode=web` });
+  const supabase = await createServerSupabaseClient({ requireCookieWrites: true });
+  await supabase.auth.resetPasswordForEmail(email, { redirectTo: webAppCallback });
   redirect('/auth/forgot?sent=true');
 }
 
@@ -76,14 +77,14 @@ export async function updatePassword(formData: FormData) {
   if (password.length < 8 || password !== confirm) {
     redirect('/auth/reset-password?message=Passwords+must+match+and+contain+at+least+8+characters.');
   }
-  const supabase = await createServerSupabaseClient();
+  const supabase = await createServerSupabaseClient({ requireCookieWrites: true });
   const { error } = await supabase.auth.updateUser({ password });
   if (error) redirect(`/auth/reset-password?message=${encodeURIComponent(error.message)}`);
   redirect('/app/settings/security?password=updated');
 }
 
 export async function signOut() {
-  const supabase = await createServerSupabaseClient();
+  const supabase = await createServerSupabaseClient({ requireCookieWrites: true });
   await supabase.auth.signOut();
   redirect('/auth?mode=signin&message=You+have+been+signed+out.');
 }

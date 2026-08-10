@@ -10,8 +10,8 @@ export async function GET() {
   const nonce = randomBytes(32).toString('base64url');
   const cookieStore = await cookies();
   cookieStore.set('cardnest_web_pin_reset', nonce, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 300, path: '/' });
-  const supabase = await createServerSupabaseClient();
-  const redirectTo = `${productionOrigin}/auth/callback?mode=web&pin_reset_nonce=${encodeURIComponent(nonce)}`;
+  const supabase = await createServerSupabaseClient({ requireCookieWrites: true });
+  const redirectTo = `${productionOrigin}/auth/callback?next=%2Fapp%2Freset-pin&pin_reset_nonce=${encodeURIComponent(nonce)}`;
   const { data, error } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo, skipBrowserRedirect: true } });
   if (error || !data.url) return NextResponse.redirect(`${productionOrigin}/app?reauth=failed`);
   return NextResponse.redirect(data.url);

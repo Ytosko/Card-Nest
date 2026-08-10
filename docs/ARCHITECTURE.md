@@ -13,7 +13,8 @@ Expo Router screens
   -> Expo SecureStore ---------> user OpenAI or Gemini key only
 
 cardnest.ytosko.dev
-  -> first-party Auth callback -> same-origin verification API -> Supabase Auth
+  -> web Auth Route Handler -> PKCE/email verification -> secure SSR cookies
+  -> mobile OAuth relay (/gauth/callback) -> cardnest:// deep link
 ```
 
 ## Source layout
@@ -37,7 +38,8 @@ All user-owned database tables carry `user_id`. Related card tables use composit
 
 ## Runtime flows
 
-- Auth emails open only `https://cardnest.ytosko.dev/auth/callback`. The same-origin endpoint verifies one-time hashes with the public anon key, removes tokens from the address bar, and hands a resulting session to the app scheme.
+- Auth emails open only `https://cardnest.ytosko.dev/auth/callback`. The same-origin Route Handler verifies one-time hashes with the public anon key, persists the web session in secure cookies, and redirects to the appropriate first-party web destination.
+- Web Google OAuth returns to `/auth/callback?next=/app`, where the PKCE code is exchanged before `/app` is requested. Mobile Google OAuth retains its separate `/gauth/callback` relay and `cardnest://` handoff.
 - Camera/gallery captures are compressed and copied into application documents before SQLite accepts the queue row. The queue creates the cloud card, uploads private images, optionally runs device-keyed AI extraction, and preserves retry state.
 - Cloud cards are queried through RLS-aware Supabase APIs. Private images use short-lived signed URLs and restore across devices after sign-in.
 - OpenAI/Gemini keys never enter React Query, SQLite, Postgres, logs, or environment configuration. Only provider/model preferences synchronize.

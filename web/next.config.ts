@@ -8,6 +8,7 @@ const nextConfig: NextConfig = {
   outputFileTracingRoot: webRoot,
   poweredByHeader: false,
   reactStrictMode: true,
+  logging: { incomingRequests: false },
   turbopack: { root: webRoot },
   expireTime: 3600,
   async rewrites() {

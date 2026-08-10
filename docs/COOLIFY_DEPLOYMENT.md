@@ -70,6 +70,7 @@ Use the same public values as `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABA
    /api/health
    ```
 6. Open `/app`. A signed-out request must return to `/auth`, while a valid web session proceeds to browser PIN setup/unlock and the private app shell.
+7. Start Google sign-in from the web login page and confirm the provider returns to `https://cardnest.ytosko.dev/auth/callback?next=/app`, the callback establishes secure cookies, and `/app` reaches PIN setup/unlock without visiting `cardnest://`.
 
 The first-party Card Nest callback prevents email confirmation/recovery users from being shown a Supabase-hosted callback page. Google OAuth must still visit Google and Supabase unless a Supabase custom domain is configured; do not represent that provider-controlled redirect as a same-origin request.
 

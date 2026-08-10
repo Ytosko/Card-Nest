@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
 import { Brand } from '@/components/brand';
+import { GoogleGLogo } from '@/components/google-g-logo';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 
 import { signIn, signUp, startGoogleSignIn } from './actions';
@@ -20,7 +21,7 @@ export default async function AuthPage({ searchParams }: { searchParams: Params 
   return (
     <main className="auth-page">
       <section className="auth-story" aria-label="About Card Nest">
-        <Link href="/" className="auth-brand"><Brand /></Link>
+        <Brand className="auth-brand" />
         <div className="auth-story-copy">
           <p className="eyebrow">YOUR CONTACT LIBRARY, EVERYWHERE</p>
           <h1>Turn business cards into useful relationships.</h1>
@@ -45,7 +46,12 @@ export default async function AuthPage({ searchParams }: { searchParams: Params 
             <button className="button button-primary" type="submit">{signup ? 'Create account' : 'Log in'}</button>
           </form>
           <div className="auth-divider"><span>or</span></div>
-          <form action={startGoogleSignIn}><button className="button button-secondary" type="submit">Continue with Google</button></form>
+          <form action={startGoogleSignIn} className="oauth-form">
+            <button className="button button-secondary full-button google-button" type="submit">
+              <GoogleGLogo />
+              <span>Continue with Google</span>
+            </button>
+          </form>
           <div className="auth-links">
             <Link href={signup ? '/auth?mode=signin' : '/auth?mode=signup'}>{signup ? 'Already have an account? Log in' : 'New to Card Nest? Create account'}</Link>
             {!signup ? <Link href="/auth/forgot">Forgot password?</Link> : null}
