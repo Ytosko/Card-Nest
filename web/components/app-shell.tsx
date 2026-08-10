@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 
 import { signOut } from '@/app/auth/actions';
 import { Brand } from '@/components/brand';
+import { UserAvatar } from '@/components/user-avatar';
 
 const navigation = [
   { href: '/app', label: 'Overview', icon: Home },
@@ -15,7 +16,14 @@ const navigation = [
   { href: '/app/settings', label: 'Settings', icon: Settings },
 ];
 
-export function AppShell({ children, displayName, email }: { children: React.ReactNode; displayName: string; email: string }) {
+type AppShellProps = {
+  avatarSources: string[];
+  children: React.ReactNode;
+  displayName: string;
+  email: string;
+};
+
+export function AppShell({ avatarSources, children, displayName, email }: AppShellProps) {
   const pathname = usePathname();
   return <div className="app-frame">
     <aside className="app-sidebar">
@@ -24,11 +32,11 @@ export function AppShell({ children, displayName, email }: { children: React.Rea
         const active = href === '/app' ? pathname === href : pathname.startsWith(href);
         return <Link className={`app-nav-link ${active ? 'active' : ''}`} href={href} key={href}><Icon aria-hidden size={20} /><span>{label}</span></Link>;
       })}</nav>
-      <div className="sidebar-account"><div className="account-avatar">{displayName.slice(0, 1).toUpperCase()}</div><div><strong>{displayName}</strong><span>{email}</span></div></div>
+      <Link aria-label="Open profile settings" className="sidebar-account" href="/app/settings/profile"><UserAvatar displayName={displayName} email={email} size="compact" sources={avatarSources} /><div className="account-details"><strong>{displayName}</strong><span>{email}</span></div></Link>
       <button className="lock-now" onClick={() => window.dispatchEvent(new Event('cardnest:web-lock'))}><ShieldCheck size={18} />Lock now</button>
       <form action={signOut}><button className="signout-button">Sign out</button></form>
     </aside>
-    <div className="app-content"><header className="mobile-app-header"><Brand /><button onClick={() => window.dispatchEvent(new Event('cardnest:web-lock'))} aria-label="Lock Card Nest"><ShieldCheck /></button></header><main>{children}</main></div>
+    <div className="app-content"><header className="mobile-app-header"><Brand /><div className="mobile-account-actions"><Link aria-label="Open profile settings" href="/app/settings/profile"><UserAvatar displayName={displayName} email={email} size="compact" sources={avatarSources} /></Link><button onClick={() => window.dispatchEvent(new Event('cardnest:web-lock'))} aria-label="Lock Card Nest"><ShieldCheck /></button></div></header><main>{children}</main></div>
     <nav className="mobile-app-nav" aria-label="Card Nest mobile workspace">{navigation.slice(0, 5).map(({ href, label, icon: Icon }) => <Link className={(href === '/app' ? pathname === href : pathname.startsWith(href)) ? 'active' : ''} href={href} key={href}><Icon aria-hidden size={21} /><span>{label}</span></Link>)}</nav>
   </div>;
 }

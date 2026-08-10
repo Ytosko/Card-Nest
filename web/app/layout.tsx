@@ -23,7 +23,10 @@ export const metadata: Metadata = {
   // Next.js normalizes the root canonical to the no-trailing-slash form; for a domain
   // root both forms are the identical URL (empty path resolves to "/").
   alternates: { canonical: 'https://cardnest.ytosko.dev/' },
-  icons: { icon: '/logo.svg', apple: '/logo.svg' },
+  icons: {
+    icon: [{ url: '/cardnest-icon.png', sizes: '1024x1024', type: 'image/png' }],
+    apple: [{ url: '/cardnest-icon.png', sizes: '1024x1024', type: 'image/png' }],
+  },
   ...(googleSiteVerification ? { verification: { google: googleSiteVerification } } : {}),
   openGraph: {
     type: 'website',
