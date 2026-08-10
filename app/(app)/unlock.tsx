@@ -11,7 +11,6 @@ import { AuthShell } from '@/src/features/auth/components/auth-shell';
 import { signInWithPasskey } from '@/src/features/auth/passkey-service';
 import { useSecurity } from '@/src/features/security/security-provider';
 import {
-  authenticateWithBiometrics,
   clearDeviceLock,
   verifyPin,
 } from '@/src/features/security/security-storage';
@@ -22,8 +21,16 @@ export default function AppUnlockScreen() {
   const theme = useAppTheme();
   const router = useRouter();
   const { session } = useAuth();
-  const { unlockMethod, biometricEnabled, pendingDeepLink, setPendingDeepLink, unlock, refreshSecurityState } =
-    useSecurity();
+  const {
+    unlockMethod,
+    lockState,
+    biometricEnabled,
+    pendingDeepLink,
+    setPendingDeepLink,
+    unlock,
+    triggerBiometricUnlock,
+    refreshSecurityState,
+  } = useSecurity();
 
   const [pin, setPin] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -57,14 +64,14 @@ export default function AppUnlockScreen() {
   }, [lockoutTimer]);
 
   useEffect(() => {
-    if (biometricEnabled && unlockMethod === 'pin') {
+    if (biometricEnabled && unlockMethod === 'pin' && lockState === 'LOCKED') {
       void (async () => {
-        const success = await authenticateWithBiometrics('app_unlock_screen');
+        const success = await triggerBiometricUnlock('app_unlock_screen');
         if (success) {
           await handleSuccessfulUnlock();
         }
       })();
-    } else if (unlockMethod === 'passkey') {
+    } else if (unlockMethod === 'passkey' && lockState === 'LOCKED') {
       void (async () => {
         setError(null);
         setLoading(true);
@@ -83,7 +90,7 @@ export default function AppUnlockScreen() {
         }
       })();
     }
-  }, [biometricEnabled, handleSuccessfulUnlock, unlockMethod]);
+  }, [biometricEnabled, handleSuccessfulUnlock, lockState, triggerBiometricUnlock, unlockMethod]);
 
   async function attemptPasskeyUnlock() {
     setError(null);
@@ -104,7 +111,7 @@ export default function AppUnlockScreen() {
   }
 
   async function attemptBiometricUnlock() {
-    const success = await authenticateWithBiometrics('user_tap_biometrics');
+    const success = await triggerBiometricUnlock('user_tap_biometrics');
     if (success) {
       await handleSuccessfulUnlock();
     }

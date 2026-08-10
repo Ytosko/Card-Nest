@@ -1,7 +1,8 @@
-import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 
 import {
+  authenticateWithBiometrics,
   getAutoLockTimeout,
   getUnlockMethod,
   isBiometricActive,
@@ -11,9 +12,12 @@ import {
   type UnlockMethod,
 } from './security-storage';
 
+export type LockState = 'UNCONFIGURED' | 'LOCKED' | 'AUTHENTICATING' | 'UNLOCKED';
+
 interface SecurityContextValue {
   initialized: boolean;
   unlockMethod: UnlockMethod;
+  lockState: LockState;
   isConfigured: boolean;
   isUnlocked: boolean;
   autoLockTimeout: AutoLockTimeout;
@@ -22,12 +26,14 @@ interface SecurityContextValue {
   setPendingDeepLink: (path: string | null) => void;
   unlock: () => void;
   lock: () => void;
+  triggerBiometricUnlock: (source?: string) => Promise<boolean>;
   refreshSecurityState: () => Promise<void>;
 }
 
 const SecurityContext = createContext<SecurityContextValue>({
   initialized: false,
   unlockMethod: null,
+  lockState: 'UNCONFIGURED',
   isConfigured: false,
   isUnlocked: false,
   autoLockTimeout: '1m',
@@ -36,6 +42,7 @@ const SecurityContext = createContext<SecurityContextValue>({
   setPendingDeepLink: () => {},
   unlock: () => {},
   lock: () => {},
+  triggerBiometricUnlock: async () => false,
   refreshSecurityState: async () => {},
 });
 
@@ -57,15 +64,16 @@ function getTimeoutMs(timeout: AutoLockTimeout): number {
 export function SecurityProvider({ children }: { children: React.ReactNode }) {
   const [initialized, setInitialized] = useState(false);
   const [unlockMethod, setUnlockMethodState] = useState<UnlockMethod>(null);
-  const [isUnlocked, setIsUnlocked] = useState(false);
+  const [lockState, setLockState] = useState<LockState>('LOCKED');
   const [autoLockTimeout, setAutoLockTimeoutState] = useState<AutoLockTimeout>('1m');
   const [biometricEnabled, setBiometricEnabledState] = useState(false);
   const [pendingDeepLink, setPendingDeepLink] = useState<string | null>(null);
 
   const backgroundTimeRef = useRef<number | null>(null);
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+  const isBiometricOverlayActiveRef = useRef<boolean>(false);
 
-  const refreshSecurityState = async () => {
+  const refreshSecurityState = useCallback(async () => {
     try {
       const method = await getUnlockMethod();
       const timeout = await getAutoLockTimeout();
@@ -76,18 +84,20 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
       setBiometricEnabledState(bioEnabled);
 
       if (!method) {
-        setIsUnlocked(true); // Unconfigured devices do not block with unlock screen
+        setLockState('UNCONFIGURED');
+      } else if (lockState === 'UNCONFIGURED') {
+        setLockState('LOCKED');
       }
     } catch {
       // Graceful fallback
     } finally {
       setInitialized(true);
     }
-  };
+  }, [lockState]);
 
   useEffect(() => {
     void refreshSecurityState();
-  }, []);
+  }, [refreshSecurityState]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextAppState) => {
@@ -99,12 +109,17 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
         (appStateRef.current === 'background' || appStateRef.current === 'inactive') &&
         nextAppState === 'active';
 
-      if (isGoingBackground) {
-        // Ignore background transitions caused by OS Biometric Prompt system overlay
-        if (isBiometricActive()) {
-          logLockDiagnostic('unlock_suppressed', { reason: 'biometric_overlay_active' });
-          return;
+      // Explicit biometric overlay suppression mechanism
+      if (isBiometricOverlayActiveRef.current || isBiometricActive()) {
+        console.log(`[BIOMETRIC_SKIPPED state=${nextAppState} reason=biometric_overlay_active]`);
+        if (nextAppState === 'active') {
+          isBiometricOverlayActiveRef.current = false;
         }
+        appStateRef.current = nextAppState;
+        return;
+      }
+
+      if (isGoingBackground) {
         backgroundTimeRef.current = Date.now();
       }
 
@@ -113,7 +128,7 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
         const maxAllowed = getTimeoutMs(autoLockTimeout);
         if (elapsed >= maxAllowed) {
           logLockDiagnostic('relock_triggered', { elapsed, maxAllowed });
-          setIsUnlocked(false); // Relock Card Nest
+          setLockState('LOCKED');
         }
         backgroundTimeRef.current = null;
       }
@@ -126,20 +141,53 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
     };
   }, [autoLockTimeout, unlockMethod]);
 
-  const unlock = () => {
+  const unlock = useCallback(() => {
     logLockDiagnostic('unlock_state_changed', { isUnlocked: true });
-    setIsUnlocked(true);
-  };
-  const lock = () => {
+    setLockState('UNLOCKED');
+  }, []);
+
+  const lock = useCallback(() => {
     logLockDiagnostic('unlock_state_changed', { isUnlocked: false });
-    setIsUnlocked(false);
-  };
+    setLockState('LOCKED');
+  }, []);
+
+  const triggerBiometricUnlock = useCallback(async (source = 'unknown'): Promise<boolean> => {
+    if (lockState === 'UNLOCKED') {
+      console.log(`[BIOMETRIC_SKIPPED state=UNLOCKED reason=already_unlocked source=${source}]`);
+      return true;
+    }
+
+    if (isBiometricOverlayActiveRef.current) {
+      console.log(`[BIOMETRIC_SKIPPED state=AUTHENTICATING reason=already_in_progress source=${source}]`);
+      return false;
+    }
+
+    setLockState('AUTHENTICATING');
+    isBiometricOverlayActiveRef.current = true;
+
+    try {
+      const success = await authenticateWithBiometrics(source);
+      if (success) {
+        setLockState('UNLOCKED');
+        return true;
+      } else {
+        setLockState('LOCKED');
+        return false;
+      }
+    } catch {
+      setLockState('LOCKED');
+      return false;
+    }
+  }, [lockState]);
+
+  const isUnlocked = lockState === 'UNCONFIGURED' || lockState === 'UNLOCKED';
 
   return (
     <SecurityContext.Provider
       value={{
         initialized,
         unlockMethod,
+        lockState,
         isConfigured: unlockMethod !== null,
         isUnlocked,
         autoLockTimeout,
@@ -148,6 +196,7 @@ export function SecurityProvider({ children }: { children: React.ReactNode }) {
         setPendingDeepLink,
         unlock,
         lock,
+        triggerBiometricUnlock,
         refreshSecurityState,
       }}
     >

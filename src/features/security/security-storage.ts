@@ -241,15 +241,20 @@ export async function authenticateWithBiometrics(
   if (Platform.OS === 'web') return false;
 
   if (isBiometricPromptActive) {
+    console.log(`[BIOMETRIC_SKIPPED state=ACTIVE reason=already_in_progress source=${source}]`);
     logLockDiagnostic('unlock_suppressed', { reason: 'already_in_progress', source });
     return false;
   }
 
   try {
     const hasHardware = await hasLocalBiometricHardware();
-    if (!hasHardware) return false;
+    if (!hasHardware) {
+      console.log(`[BIOMETRIC_SKIPPED state=NO_HARDWARE reason=unsupported source=${source}]`);
+      return false;
+    }
 
     isBiometricPromptActive = true;
+    console.log(`[BIOMETRIC_REQUEST source=${source}]`);
     logLockDiagnostic('unlock_requested', { source });
 
     const res = await LocalAuthentication.authenticateAsync({
@@ -260,13 +265,16 @@ export async function authenticateWithBiometrics(
     });
 
     if (res.success) {
+      console.log(`[BIOMETRIC_RESULT source=${source} success=true]`);
       logLockDiagnostic('unlock_succeeded', { source });
       return true;
     } else {
+      console.log(`[BIOMETRIC_RESULT source=${source} success=false error=${res.error}]`);
       logLockDiagnostic('unlock_failed_or_cancelled', { source, error: res.error });
       return false;
     }
   } catch (err: any) {
+    console.log(`[BIOMETRIC_RESULT source=${source} success=false exception=${err?.message}]`);
     logLockDiagnostic('unlock_failed_exception', { source, error: err?.message });
     return false;
   } finally {
