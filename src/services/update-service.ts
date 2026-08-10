@@ -292,15 +292,28 @@ export function parseGithubRelease(release: GithubRelease): NativeRelease | null
   };
 }
 
-function compareReleases(left: NativeRelease, right: NativeRelease): number {
-  if (left.versionCode && right.versionCode && left.versionCode !== right.versionCode) {
-    return left.versionCode - right.versionCode;
-  }
-  const semverComparison = compareSemVer(left.versionName, right.versionName);
-  if (semverComparison !== 0) return semverComparison;
-  const channelComparison = channelRank(getReleaseChannel(left.versionName)) - channelRank(getReleaseChannel(right.versionName));
-  if (channelComparison !== 0) return channelComparison;
-  return (left.versionCode || 0) - (right.versionCode || 0);
+export function selectLatestRelease(
+  current: VersionInfo,
+  candidates: NativeRelease[],
+): NativeRelease | undefined {
+  const currentChannel = getReleaseChannel(current.versionName);
+  const eligible = candidates.filter((item) =>
+    acceptsReleaseChannel(currentChannel, getReleaseChannel(item.versionName)),
+  );
+
+  // Sort descending by versionCode first (highest versionCode first), then semver fallback
+  eligible.sort((left, right) => {
+    const leftCode = left.versionCode ?? 0;
+    const rightCode = right.versionCode ?? 0;
+    if (leftCode !== rightCode) {
+      return rightCode - leftCode;
+    }
+    return compareSemVer(right.versionName, left.versionName);
+  });
+
+  return eligible.find((item) =>
+    isNewerVersion(current, item.tagName, item.releaseNotes, item.versionCode),
+  );
 }
 
 export async function checkForOtaUpdate(): Promise<{ isAvailable: boolean; isDownloaded: boolean; error?: string }> {
@@ -355,11 +368,9 @@ export async function checkForAppUpdate(
     const payload: unknown = await response.json();
     if (!Array.isArray(payload)) throw new Error('Release server returned an invalid response.');
 
-    const currentChannel = getReleaseChannel(current.versionName);
     const parsedReleases = payload
       .map((item) => parseGithubRelease(item as GithubRelease))
-      .filter((item): item is NativeRelease => Boolean(item))
-      .filter((item) => acceptsReleaseChannel(currentChannel, getReleaseChannel(item.versionName)));
+      .filter((item): item is NativeRelease => Boolean(item));
 
     // Fetch machine-readable metadata (cardnest-release.json) for candidate releases if present
     for (const rel of parsedReleases) {
@@ -386,8 +397,7 @@ export async function checkForAppUpdate(
       }
     }
 
-    const sortedReleases = [...parsedReleases].sort((left, right) => compareReleases(right, left));
-    const latest = sortedReleases.find((item) => isNewerVersion(current, item.tagName, item.releaseNotes, item.versionCode));
+    const latest = selectLatestRelease(current, parsedReleases);
 
     logUpdateDiagnostic('update_check_completed', {
       installedVersionName: current.versionName,

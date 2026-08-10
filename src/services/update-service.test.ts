@@ -150,6 +150,7 @@ import {
   parseSemVer,
   parseVersionCodeFromRelease,
   resetUpdateServiceCacheForTests,
+  selectLatestRelease,
   type NativeRelease,
 } from './update-service';
 
@@ -268,6 +269,41 @@ describe('native update release selection', () => {
     });
     expect(parsed).toMatchObject({ versionName: release.versionName, versionCode: 12 });
     expect(parseGithubRelease({ tag_name: release.tagName, assets: [{ name: 'random.apk', size: assetSize }] })).toBeNull();
+  });
+
+  it('selects the release with the highest valid Android versionCode regardless of GitHub API array ordering', () => {
+    const current = { versionName: '1.0.5-beta-f0D3X', versionCode: 14 };
+
+    const rel14: NativeRelease = { ...release, versionName: '1.0.5-beta-f0D3X', versionCode: 14, tagName: 'v1.0.5-beta-f0D3X' };
+    const rel15: NativeRelease = { ...release, versionName: '1.0.1-X0811', versionCode: 15, tagName: 'v1.0.1-X0811' };
+    const rel16: NativeRelease = { ...release, versionName: '1.0.2-X0811', versionCode: 16, tagName: 'v1.0.2-X0811' };
+
+    // Newest (vc 16) is LAST in GitHub API array response: [vc 14, vc 15, vc 16]
+    expect(selectLatestRelease(current, [rel14, rel15, rel16])?.versionCode).toBe(16);
+
+    // Newest (vc 16) is FIRST in GitHub API array response: [vc 16, vc 15, vc 14]
+    expect(selectLatestRelease(current, [rel16, rel15, rel14])?.versionCode).toBe(16);
+
+    // Newest (vc 16) is MIDDLE in GitHub API array response: [vc 15, vc 16, vc 14]
+    expect(selectLatestRelease(current, [rel15, rel16, rel14])?.versionCode).toBe(16);
+  });
+
+  it('ignores draft releases even if draft has a higher versionCode', () => {
+    const draft = parseGithubRelease({
+      tag_name: 'v1.0.9-draft',
+      body: 'versionCode: 999',
+      draft: true,
+      assets: [{ name: 'Card-Nest-1.0.9-draft-android.apk', browser_download_url: 'https://github.com/Ytosko/Card-Nest/releases/download/v1.0.9-draft/Card-Nest-1.0.9-draft-android.apk', size: assetSize }],
+    });
+    expect(draft).toBeNull();
+  });
+
+  it('never offers a downgrade when installed versionCode is equal or higher', () => {
+    const current = { versionName: '1.0.2-X0811', versionCode: 16 };
+    const rel16: NativeRelease = { ...release, versionName: '1.0.2-X0811', versionCode: 16, tagName: 'v1.0.2-X0811' };
+    const rel15: NativeRelease = { ...release, versionName: '1.0.1-X0811', versionCode: 15, tagName: 'v1.0.1-X0811' };
+
+    expect(selectLatestRelease(current, [rel16, rel15])).toBeUndefined();
   });
 
   it('selects the verified newer release from GitHub using cardnest-release.json metadata', async () => {
