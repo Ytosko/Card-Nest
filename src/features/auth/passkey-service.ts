@@ -242,9 +242,10 @@ export async function registerPasskey(friendlyName?: string): Promise<PasskeyRes
 
     // Native Mobile Registration (Android Credential Manager / iOS ASAuthorizationController)
     const { data: startData, error: startError } = await supabase.auth.passkey.startRegistration();
+    const defaultFailMessage = "Passkey couldn't be created. Please try again or use your Card Nest PIN.";
     if (startError || !startData) {
       logPasskeyDiagnostic('native_create_failed', { err: startError || 'Missing start registration payload' });
-      return { success: false, error: "Passkey couldn't be created. You can try again or set it up later from Security settings.", code: 'PASSKEY_AUTH_FAILED' };
+      return { success: false, error: defaultFailMessage, code: 'PASSKEY_AUTH_FAILED' };
     }
 
     const challengeId = (startData as any).challengeId || (startData as any).id || '';
@@ -261,8 +262,7 @@ export async function registerPasskey(friendlyName?: string): Promise<PasskeyRes
       if (isUserCancellation(createErr)) {
         return { success: false, error: 'Passkey registration was cancelled.', code: 'PASSKEY_CANCELLED', isCancelled: true };
       }
-      const detailedMessage = createErr?.message ? `Passkey couldn't be created (${createErr.message}).` : "Passkey couldn't be created. You can try again or set it up later from Security settings.";
-      return { success: false, error: detailedMessage, code: 'PASSKEY_AUTH_FAILED' };
+      return { success: false, error: defaultFailMessage, code: 'PASSKEY_AUTH_FAILED' };
     }
 
     if (!credential) {
@@ -277,7 +277,7 @@ export async function registerPasskey(friendlyName?: string): Promise<PasskeyRes
     });
     if (verifyError) {
       logPasskeyDiagnostic('registration_verify_failed', { err: verifyError });
-      return { success: false, error: `Passkey verification failed (${verifyError.message}). Please try again.`, code: 'PASSKEY_AUTH_FAILED' };
+      return { success: false, error: defaultFailMessage, code: 'PASSKEY_AUTH_FAILED' };
     }
 
     logPasskeyDiagnostic('registration_verify_succeeded');
@@ -297,8 +297,7 @@ export async function registerPasskey(friendlyName?: string): Promise<PasskeyRes
     if (isUserCancellation(err)) {
       return { success: false, error: 'Passkey registration was cancelled.', code: 'PASSKEY_CANCELLED', isCancelled: true };
     }
-    const detailedMessage = err?.message ? `Passkey couldn't be created (${err.message}).` : "Passkey couldn't be created. You can try again or set it up later from Security settings.";
-    return { success: false, error: detailedMessage, code: 'PASSKEY_AUTH_FAILED' };
+    return { success: false, error: "Passkey couldn't be created. Please try again or use your Card Nest PIN.", code: 'PASSKEY_AUTH_FAILED' };
   }
 }
 

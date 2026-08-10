@@ -20,6 +20,9 @@ export const supabase = createClient<Database>(
       persistSession: true,
       detectSessionInUrl: false,
       lock: processLock,
+      experimental: {
+        passkey: true,
+      },
     },
     global: {
       headers: {
