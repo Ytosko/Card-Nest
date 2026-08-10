@@ -5,6 +5,9 @@ import { Camera, ImagePlus, LoaderCircle, RotateCcw, Sparkles, UploadCloud, X } 
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { ConfirmDialog } from '@/components/feedback';
+import { startCardNestNavigation } from '@/components/navigation-progress';
+
 type Side = 'front' | 'back';
 type Prepared = { side: Side; name: string; original: string; ai: string };
 type ExtractionMeta = { provider?: string; model?: string };
@@ -40,6 +43,7 @@ export function ScanWorkspace() {
   const [files, setFiles] = useState<Partial<Record<Side, Prepared>>>({});
   const [result, setResult] = useState<Result | null>(null); const [meta, setMeta] = useState<ExtractionMeta>({});
   const [busy, setBusy] = useState(false); const [message, setMessage] = useState<string | null>(null);
+  const [duplicateName, setDuplicateName] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false); const [cameraSide, setCameraSide] = useState<Side | null>(null);
   const frontRef = useRef<HTMLInputElement>(null); const backRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null); const streamRef = useRef<MediaStream | null>(null);
@@ -106,11 +110,11 @@ export function ScanWorkspace() {
       const data = await response.json();
       if (response.status === 409 && data.duplicate) {
         setBusy(false);
-        if (confirm(`${data.duplicate.display_name || 'A contact'} already has the same primary email or phone. Save another copy anyway?`)) return void save(true);
+        setDuplicateName(data.duplicate.display_name || 'A contact');
         return;
       }
       if (!response.ok || !data.ok) throw new Error(data.error ?? 'Contact save failed.');
-      router.push(`/app/contacts/${data.id}?saved=true`); router.refresh();
+      startCardNestNavigation(); router.push(`/app/contacts/${data.id}?saved=true`); router.refresh();
     } catch (error) { setMessage(error instanceof Error ? error.message : 'Contact save failed.'); }
     finally { setBusy(false); }
   }
@@ -126,5 +130,6 @@ export function ScanWorkspace() {
       <button className="button button-primary full-button" disabled={busy || !files.front} onClick={() => void extract()} type="button">{busy ? <LoaderCircle className="spin" /> : <Sparkles />}Extract contact details</button></section>
       {result ? <section className="panel review-panel"><div className="panel-heading"><div><p className="eyebrow">REVIEW EXTRACTION</p><h2>Correct before saving</h2></div><button aria-label="Start over" className="icon-button" onClick={() => { setResult(null); setFiles({}); setMeta({}); }} type="button"><RotateCcw /></button></div><div className="field-grid"><label className="span-2">Display name<input value={result.displayName} onChange={(event) => update('displayName', event.target.value)} /></label><label>First name<input value={result.firstName} onChange={(event) => update('firstName', event.target.value)} /></label><label>Last name<input value={result.lastName} onChange={(event) => update('lastName', event.target.value)} /></label><label>Company<input value={result.company} onChange={(event) => update('company', event.target.value)} /></label><label>Job title<input value={result.jobTitle} onChange={(event) => update('jobTitle', event.target.value)} /></label><label className="span-2">Emails<textarea rows={3} value={result.emails.map((item) => item.email).join('\n')} onChange={(event) => update('emails', event.target.value.split(/\r?\n/u).filter(Boolean).map((email, index) => ({ email, label: 'Work', isPrimary: index === 0 })))} /></label><label className="span-2">Phones<textarea rows={3} value={result.phones.map((item) => item.number).join('\n')} onChange={(event) => update('phones', event.target.value.split(/\r?\n/u).filter(Boolean).map((number, index) => ({ number, label: 'Mobile', service: '', serviceLabel: '', isPrimary: index === 0 })))} /></label><label className="span-2">Websites<textarea rows={2} value={result.websites.join('\n')} onChange={(event) => update('websites', event.target.value.split(/\r?\n/u).filter(Boolean))} /></label><label className="span-2">Address<input value={result.addressLine1} onChange={(event) => update('addressLine1', event.target.value)} /></label><label>City<input value={result.city} onChange={(event) => update('city', event.target.value)} /></label><label>Country<input value={result.country} onChange={(event) => update('country', event.target.value)} /></label><label className="span-2">Notes<textarea rows={3} value={result.notes} onChange={(event) => update('notes', event.target.value)} /></label></div><button className="button button-primary full-button" disabled={busy} onClick={() => void save()} type="button">Save to Card Nest</button></section> : <aside className="panel scan-help"><p className="eyebrow">PRIVACY BOUNDARY</p><h2>Your key stays server-side</h2><p>The browser sends prepared card images to Card Nest’s authenticated Edge Function. Your encrypted provider key is decrypted only in trusted server memory and is never returned to this page.</p><p>Original card images are retained privately in your cloud library after you approve the extracted details.</p></aside>}
     </div>
+    <ConfirmDialog busy={busy} confirmLabel="Save another copy" danger={false} description={`${duplicateName ?? 'A contact'} already has the same primary email or phone. Continue only if this is a separate contact.`} eyebrow="POSSIBLE DUPLICATE" onCancel={() => setDuplicateName(null)} onConfirm={() => { setDuplicateName(null); void save(true); }} open={Boolean(duplicateName)} progressLabel="Saving contact…" title="Save a duplicate contact?" />
   </section>;
 }

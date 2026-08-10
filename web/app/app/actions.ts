@@ -65,20 +65,25 @@ export async function setContactsFavorite(ids: string[], favorite: boolean) {
 
 export async function deleteContacts(ids: string[]) {
   const { supabase, user } = await requireWebUser(); if (!user) throw new Error('Authentication required.');
-  const safeIds = ids.filter((id) => /^[0-9a-f-]{36}$/iu.test(id)).slice(0, 200); if (!safeIds.length) return;
-  const { data } = await supabase.from('cards').select('id,contact_photo_path,card_images(storage_path)').in('id', safeIds);
-  const photos = (data ?? []).flatMap((card) => card.contact_photo_path ? [card.contact_photo_path] : []);
-  const images = (data ?? []).flatMap((card) => card.card_images.map((image) => image.storage_path));
+  const safeIds = [...new Set(ids.filter((id) => /^[0-9a-f-]{36}$/iu.test(id)))].slice(0, 200);
+  if (!safeIds.length) return { succeededIds: [] as string[], failedIds: [] as string[] };
+  const { data, error: loadError } = await supabase.from('cards').select('id,contact_photo_path,card_images(storage_path)').in('id', safeIds);
+  if (loadError) throw new Error('Card Nest could not prepare those contacts for deletion.');
+  const existing = data ?? [];
+  const existingIds = existing.map((card) => card.id);
+  if (!existingIds.length) return { succeededIds: [] as string[], failedIds: safeIds };
+
+  const { data: deleted, error } = await supabase.from('cards').delete().in('id', existingIds).select('id');
+  if (error) throw new Error('Card Nest could not delete those contacts.');
+  const succeededIds = (deleted ?? []).map((card) => card.id);
+  const succeeded = new Set(succeededIds);
+  const removedCards = existing.filter((card) => succeeded.has(card.id));
+  const photos = removedCards.flatMap((card) => card.contact_photo_path ? [card.contact_photo_path] : []);
+  const images = removedCards.flatMap((card) => card.card_images.map((image) => image.storage_path));
   if (photos.length) await supabase.storage.from('contact-photos').remove(photos);
   if (images.length) await supabase.storage.from('card-images').remove(images);
-  const { error } = await supabase.from('cards').delete().in('id', safeIds); if (error) throw error;
   revalidatePath('/app'); revalidatePath('/app/contacts');
-}
-
-export async function deleteContactAndRedirect(formData: FormData) {
-  const id = String(formData.get('id') ?? '');
-  await deleteContacts([id]);
-  redirect('/app/contacts?deleted=true');
+  return { succeededIds, failedIds: safeIds.filter((id) => !succeeded.has(id)) };
 }
 
 export async function toggleFavoriteForm(formData: FormData) {

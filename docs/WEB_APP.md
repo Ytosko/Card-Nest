@@ -12,7 +12,7 @@ The production Next.js application in `web/` serves both the public Card Nest we
 - `/app/scan` — upload, drag/drop, paste, and `MediaDevices` camera capture for front/back cards
 - `/app/settings/profile` — shared profile foundation
 - `/app/settings/ai` — encrypted BYOK provider credentials and dynamic model selection
-- `/app/settings/security` — browser PIN and inactivity timeout
+- `/app/settings/security` — browser PIN and temporary unlock policy
 - `/api/app/export` — selected/all vCard and CSV exports
 
 All private reads and writes use the same hosted Supabase users, schema, RLS policies, and private Storage buckets as the mobile application. No service-role key is present in the Next.js runtime.
@@ -27,7 +27,9 @@ Next.js `proxy.ts` refreshes expiring Supabase sessions before private Server Co
 
 After a successful account login, each browser must create its own six-digit PIN. The plaintext PIN is never persisted or synchronized. Card Nest generates a random 128-bit salt and derives a verifier with PBKDF2-SHA-256 at 210,000 iterations through Web Crypto. Local storage contains only the versioned salt, verifier, timeout, and retry state under a per-user key.
 
-Incorrect attempts receive increasing delays. The private UI can lock immediately or after 1, 5, or 15 minutes of inactivity/visibility changes without destroying the valid Supabase session. Forgot-PIN reset requires fresh password or Google OAuth re-authentication and resets only the current browser. Google recovery uses a five-minute HttpOnly nonce that is consumed after the successful callback. Mobile PINs and browser PINs are intentionally independent. Biometrics and passkeys are not shown on the web.
+Incorrect attempts receive increasing delays. After verification, the browser writes a separate temporary unlock proof to `sessionStorage`; it contains only the authenticated user ID, PIN-config generation ID, unlock time, and expiration time. The default window is six hours, with browser restart, one hour, six hours, and twelve hours available in Security settings. Refreshes and normal `/app/*` navigation reuse that proof, and `BroadcastChannel` synchronizes unlock and explicit lock events between same-origin Card Nest tabs. The proof is rejected after expiration, an account switch, a PIN change/reset, explicit lock, or sign-out.
+
+Using `sessionStorage` is an intentional security tradeoff: the browser remains unlocked across refreshes and same-session tabs but requires the PIN again after the full browser session is closed. The PIN and verifier are never placed in the temporary record. Expiration is enforced on a safe route or visibility transition so an in-progress scan or edit remains mounted instead of losing draft state. Forgot-PIN reset requires fresh password or Google OAuth re-authentication and resets only the current browser. Google recovery uses a five-minute HttpOnly nonce that is consumed after the successful callback. Mobile PINs and browser PINs are intentionally independent. Biometrics and passkeys are not shown on the web.
 
 ## AI credential boundary
 
