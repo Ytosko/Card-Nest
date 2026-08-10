@@ -14,7 +14,7 @@ export default function SettingsScreen() {
   const theme = useAppTheme();
   const router = useRouter();
   const { profile, user } = useAuth();
-  const appVersion = Constants.expoConfig?.version ?? '1.0.1-beta-f0D1X';
+  const appVersion = Constants.expoConfig?.version ?? '1.0.2-beta-f0D2X';
 
   return (
     <SafeAreaView edges={['top']} style={[styles.safeArea, { backgroundColor: theme.colors.background }]}>

@@ -38,7 +38,7 @@ export function logUpdateDiagnostic(event: string, meta: Record<string, any> = {
     event,
     platform: Platform.OS,
     channel: Updates.channel || 'alpha',
-    runtimeVersion: Updates.runtimeVersion || '1.0.1-beta-f0D1X',
+    runtimeVersion: Updates.runtimeVersion || '1.0.2-beta-f0D2X',
     updateId: Updates.updateId || null,
     isEmbeddedLaunch: Updates.isEmbeddedLaunch,
     ...meta,
@@ -47,8 +47,8 @@ export function logUpdateDiagnostic(event: string, meta: Record<string, any> = {
 }
 
 export function getCurrentVersionInfo(): VersionInfo {
-  const configVersion = Constants.expoConfig?.version || '1.0.1-beta-f0D1X';
-  const configVersionCode = Constants.expoConfig?.android?.versionCode || 10;
+  const configVersion = Constants.expoConfig?.version || '1.0.2-beta-f0D2X';
+  const configVersionCode = Constants.expoConfig?.android?.versionCode || 11;
   return {
     versionName: configVersion,
     versionCode: configVersionCode,

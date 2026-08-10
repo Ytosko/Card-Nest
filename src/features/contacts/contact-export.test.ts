@@ -1,28 +1,40 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { checkNativeContactMatch, exportCardToContacts } from './contact-export';
 import type { CardWithRelations } from '@/src/features/cards/card-service';
 
-const addContactAsync = vi.fn().mockResolvedValue('native-contact-1');
-const getContactsAsync = vi.fn();
-const getPermissionsAsync = vi.fn().mockResolvedValue({ granted: true });
-const requestPermissionsAsync = vi.fn().mockResolvedValue({ granted: true });
+import { checkNativeContactMatch, exportCardToContacts } from './contact-export';
+
+const mocks = vi.hoisted(() => ({
+  addContactAsync: vi.fn().mockResolvedValue('native-contact-1'),
+  getContactsAsync: vi.fn(),
+  getPermissionsAsync: vi.fn().mockResolvedValue({ granted: true }),
+  requestPermissionsAsync: vi.fn().mockResolvedValue({ granted: true }),
+  getSignedContactPhotoUrl: vi.fn().mockResolvedValue('https://storage.example/signed-photo'),
+  downloadFileAsync: vi.fn().mockResolvedValue(undefined),
+  deletePhoto: vi.fn(),
+}));
 
 vi.mock('expo-contacts', () => ({
-  get addContactAsync() {
-    return addContactAsync;
-  },
-  get getContactsAsync() {
-    return getContactsAsync;
-  },
-  get getPermissionsAsync() {
-    return getPermissionsAsync;
-  },
-  get requestPermissionsAsync() {
-    return requestPermissionsAsync;
-  },
+  addContactAsync: mocks.addContactAsync,
+  getContactsAsync: mocks.getContactsAsync,
+  getPermissionsAsync: mocks.getPermissionsAsync,
+  requestPermissionsAsync: mocks.requestPermissionsAsync,
   Fields: { Emails: 'emails', PhoneNumbers: 'phoneNumbers' },
-  ContactTypes: { Person: 'person' },
+}));
+
+vi.mock('expo-file-system', () => {
+  class MockFile {
+    static downloadFileAsync = mocks.downloadFileAsync;
+    uri = 'file:///cache/card-nest-contact-export-card-1.jpg';
+    exists = true;
+    delete = mocks.deletePhoto;
+  }
+
+  return { File: MockFile, Paths: { cache: 'file:///cache/' } };
+});
+
+vi.mock('@/src/features/cards/card-service', () => ({
+  getSignedContactPhotoUrl: mocks.getSignedContactPhotoUrl,
 }));
 
 function makeCard(overrides: Partial<CardWithRelations> = {}): CardWithRelations {
@@ -31,11 +43,22 @@ function makeCard(overrides: Partial<CardWithRelations> = {}): CardWithRelations
     user_id: 'user-1',
     display_name: 'Ada Lovelace',
     first_name: 'Ada',
+    middle_name: null,
     last_name: 'Lovelace',
     company: 'Analytical Engines',
     job_title: 'Engineer',
+    department: 'Research',
     primary_email: 'ada@engines.example',
     primary_phone: '+880 1711-000001',
+    notes: 'Met at the computing conference.',
+    contact_photo_path: null,
+    website: null,
+    address_line_1: null,
+    address_line_2: null,
+    city: null,
+    state_region: null,
+    postal_code: null,
+    country: null,
     card_emails: [],
     card_phone_numbers: [],
     card_websites: [],
@@ -48,66 +71,135 @@ function makeCard(overrides: Partial<CardWithRelations> = {}): CardWithRelations
 
 describe('exportCardToContacts', () => {
   beforeEach(() => {
-    addContactAsync.mockClear();
+    vi.clearAllMocks();
+    mocks.requestPermissionsAsync.mockResolvedValue({ granted: true });
+    mocks.getPermissionsAsync.mockResolvedValue({ granted: true });
+    mocks.addContactAsync.mockResolvedValue('native-contact-1');
+    mocks.getSignedContactPhotoUrl.mockResolvedValue('https://storage.example/signed-photo');
+    mocks.downloadFileAsync.mockResolvedValue(undefined);
   });
 
-  it('exports every phone number and email with labels, not just the primaries', async () => {
+  it('exports a rich contact through one primitive-only native payload', async () => {
     const card = makeCard({
+      contact_photo_path: 'user-1/card-1/photo.jpg',
       card_emails: [
         { email: 'ada@engines.example', label: 'work', is_primary: true },
         { email: 'ada@personal.example', label: 'personal', is_primary: false },
       ],
       card_phone_numbers: [
-        { phone_number: '+880 1711-000001', label: 'mobile', is_primary: true },
-        { phone_number: '+880 2-955555', label: 'work', is_primary: false },
-        { phone_number: '+880 2-955556', label: 'fax', is_primary: false },
+        {
+          phone_number: '+880 1711-000001',
+          label: 'mobile',
+          service: 'whatsapp,bkash',
+          service_label: 'WhatsApp, bKash',
+          is_primary: true,
+        },
+        { phone_number: '+880 2-955555', label: 'office', service: null, service_label: null, is_primary: false },
+        { phone_number: '+880 2-955556', label: 'fax', service: null, service_label: null, is_primary: false },
+      ],
+      card_websites: [
+        { url: 'https://analytical.example', label: 'work', is_primary: true },
+        { url: 'ada.example/portfolio', label: 'portfolio', is_primary: false },
+      ],
+      card_addresses: [
+        {
+          address_line_1: '12 Engine Road',
+          address_line_2: 'Suite 3',
+          city: 'Dhaka',
+          state_region: 'Dhaka',
+          postal_code: '1205',
+          country: 'Bangladesh',
+          label: 'work',
+          is_primary: true,
+        },
       ],
     } as unknown as Partial<CardWithRelations>);
 
-    await exportCardToContacts(card);
+    await expect(exportCardToContacts(card)).resolves.toBe('native-contact-1');
 
-    expect(addContactAsync).toHaveBeenCalledTimes(1);
-    const payload = addContactAsync.mock.calls[0][0];
+    expect(mocks.getSignedContactPhotoUrl).toHaveBeenCalledWith('user-1/card-1/photo.jpg');
+    expect(mocks.downloadFileAsync).toHaveBeenCalledWith(
+      'https://storage.example/signed-photo',
+      expect.objectContaining({ uri: 'file:///cache/card-nest-contact-export-card-1.jpg' }),
+      { idempotent: true }
+    );
+    expect(mocks.addContactAsync).toHaveBeenCalledTimes(1);
+    expect(mocks.deletePhoto).toHaveBeenCalledTimes(1);
 
-    expect(payload.emails).toHaveLength(2);
-    expect(payload.emails).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ email: 'ada@engines.example', isPrimary: true }),
-        expect.objectContaining({ email: 'ada@personal.example', label: 'personal' }),
-      ])
+    const payload = mocks.addContactAsync.mock.calls[0][0];
+    expect(payload).toMatchObject({
+      contactType: 'person',
+      name: 'Ada Lovelace',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      company: 'Analytical Engines',
+      jobTitle: 'Engineer',
+      department: 'Research',
+      image: { uri: 'file:///cache/card-nest-contact-export-card-1.jpg' },
+    });
+    expect(payload.phoneNumbers).toEqual([
+      { number: '+880 1711-000001', label: 'mobile' },
+      { number: '+880 2-955555', label: 'work' },
+      { number: '+880 2-955556', label: 'faxWork' },
+    ]);
+    expect(payload.emails).toEqual([
+      { email: 'ada@engines.example', label: 'work' },
+      { email: 'ada@personal.example', label: 'personal' },
+    ]);
+    expect(payload.urlAddresses).toEqual([
+      { url: 'https://analytical.example/', label: 'work' },
+      { url: 'https://ada.example/portfolio', label: 'portfolio' },
+    ]);
+    expect(payload.addresses).toEqual([
+      {
+        street: '12 Engine Road\nSuite 3',
+        city: 'Dhaka',
+        region: 'Dhaka',
+        postalCode: '1205',
+        country: 'Bangladesh',
+        label: 'work',
+      },
+    ]);
+    expect(payload.note).toBe(
+      'Met at the computing conference.\n\nWhatsApp: +880 1711-000001\nbKash: +880 1711-000001'
     );
 
-    expect(payload.phoneNumbers).toHaveLength(3);
-    expect(payload.phoneNumbers).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ number: '+880 1711-000001', isPrimary: true }),
-        expect.objectContaining({ number: '+880 2-955555', label: 'work' }),
-        expect.objectContaining({ number: '+880 2-955556', label: 'fax' }),
-      ])
-    );
+    const serialized = JSON.stringify(payload);
+    expect(serialized).not.toContain('is_primary');
+    expect(serialized).not.toContain('isPrimary');
+    expect(serialized).not.toContain('service_label');
+    expect(serialized).not.toContain('"service"');
   });
 
-  it('falls back to primary values when no relational rows exist', async () => {
+  it('falls back to primary phone and email values when relational rows are unavailable', async () => {
     await exportCardToContacts(makeCard());
 
-    const payload = addContactAsync.mock.calls[0][0];
-    expect(payload.emails).toEqual([expect.objectContaining({ email: 'ada@engines.example', isPrimary: true })]);
-    expect(payload.phoneNumbers).toEqual([
-      expect.objectContaining({ number: '+880 1711-000001', isPrimary: true }),
-    ]);
+    const payload = mocks.addContactAsync.mock.calls[0][0];
+    expect(payload.emails).toEqual([{ email: 'ada@engines.example', label: 'work' }]);
+    expect(payload.phoneNumbers).toEqual([{ number: '+880 1711-000001', label: 'mobile' }]);
+  });
+
+  it('cleans up the temporary photo even if native contact creation fails', async () => {
+    mocks.addContactAsync.mockRejectedValueOnce(new Error('Native write failed'));
+
+    await expect(
+      exportCardToContacts(makeCard({ contact_photo_path: 'user-1/card-1/photo.jpg' }))
+    ).rejects.toThrow('Native write failed');
+    expect(mocks.deletePhoto).toHaveBeenCalledTimes(1);
+  });
+
+  it('never attempts the native write when Contacts permission is denied', async () => {
+    mocks.requestPermissionsAsync.mockResolvedValueOnce({ granted: false });
+
+    await expect(exportCardToContacts(makeCard())).rejects.toThrow('Contact permission is needed');
+    expect(mocks.addContactAsync).not.toHaveBeenCalled();
   });
 });
 
 describe('checkNativeContactMatch', () => {
   it('matches on a secondary phone number, not just the primary', async () => {
-    getContactsAsync.mockResolvedValue({
-      data: [
-        {
-          id: 'native-9',
-          emails: [],
-          phoneNumbers: [{ number: '+880 2 955555' }],
-        },
-      ],
+    mocks.getContactsAsync.mockResolvedValue({
+      data: [{ id: 'native-9', emails: [], phoneNumbers: [{ number: '+880 2 955555' }] }],
     });
 
     const card = makeCard({
@@ -118,12 +210,11 @@ describe('checkNativeContactMatch', () => {
     } as unknown as Partial<CardWithRelations>);
 
     const match = await checkNativeContactMatch(card);
-    expect(match.isMatched).toBe(true);
-    expect(match.nativeContactId).toBe('native-9');
+    expect(match).toEqual({ isMatched: true, nativeContactId: 'native-9' });
   });
 
   it('does not match on names alone when no values overlap', async () => {
-    getContactsAsync.mockResolvedValue({
+    mocks.getContactsAsync.mockResolvedValue({
       data: [{ id: 'native-2', name: 'Ada Lovelace', emails: [], phoneNumbers: [{ number: '+15550100' }] }],
     });
 

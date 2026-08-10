@@ -103,8 +103,8 @@ android {
         applicationId 'dev.ytosko.cardnest'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 10
-        versionName "1.0.1-beta-f0D1X"
+        versionCode 11
+        versionName "1.0.2-beta-f0D2X"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }

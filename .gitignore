@@ -13,6 +13,7 @@ expo-env.d.ts
 
 # Native
 .kotlin/
+.idea/
 *.orig.*
 *.jks
 *.p8
@@ -56,4 +57,3 @@ app-example
 # Local Android release artifacts
 Card-Nest-*-android.apk
 Card-Nest-*-android.aab
-
