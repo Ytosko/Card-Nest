@@ -25,12 +25,20 @@ export const CompactQueueRow = React.memo(function CompactQueueRow({
 
   const isFailed = item.state === 'failed';
   const isSynced = item.state === 'synced';
-  const isUploading = item.state === 'uploading' || item.state === 'processing';
+  const isNotCard = item.state === 'not_a_card';
+  const isNeedsReview = item.state === 'needs_review';
+  const isUploading = item.state === 'uploading' || item.state === 'processing' || item.state === 'validating';
 
   const statusLabel = isFailed
     ? 'Upload paused'
+    : isNotCard
+    ? 'Not a contact card'
+    : isNeedsReview
+    ? 'Needs review'
     : isSynced
     ? 'Synced'
+    : item.state === 'validating'
+    ? 'Validating card...'
     : item.state === 'uploading'
     ? 'Uploading images...'
     : item.state === 'processing'
@@ -39,6 +47,10 @@ export const CompactQueueRow = React.memo(function CompactQueueRow({
 
   const statusIcon = isFailed
     ? 'cloud-alert-outline'
+    : isNotCard
+    ? 'file-cancel-outline'
+    : isNeedsReview
+    ? 'file-question-outline'
     : isSynced
     ? 'cloud-check-outline'
     : isUploading
@@ -46,6 +58,10 @@ export const CompactQueueRow = React.memo(function CompactQueueRow({
     : 'clock-outline';
 
   const statusColor = isFailed
+    ? theme.colors.warning
+    : isNotCard
+    ? theme.colors.danger
+    : isNeedsReview
     ? theme.colors.warning
     : isSynced
     ? theme.colors.success
@@ -111,7 +127,39 @@ export const CompactQueueRow = React.memo(function CompactQueueRow({
               <ActivityIndicator color={theme.colors.danger} size="small" />
             ) : (
               <AppText variant="caption" style={{ color: theme.colors.danger, fontSize: 11 }}>
-                Delete
+                Remove
+              </AppText>
+            )}
+          </Pressable>
+        </View>
+      ) : isNotCard ? (
+        <View style={styles.actionRow}>
+          <Pressable
+            disabled={isBusy}
+            onPress={handleDelete}
+            style={[styles.miniBtn, { backgroundColor: theme.colors.background, borderColor: theme.colors.border }]}
+          >
+            {isDeletingThisItem ? (
+              <ActivityIndicator color={theme.colors.danger} size="small" />
+            ) : (
+              <AppText variant="caption" style={{ color: theme.colors.danger, fontSize: 11 }}>
+                Remove
+              </AppText>
+            )}
+          </Pressable>
+        </View>
+      ) : isNeedsReview ? (
+        <View style={styles.actionRow}>
+          <Pressable
+            disabled={isBusy}
+            onPress={handleDelete}
+            style={[styles.miniBtn, { backgroundColor: theme.colors.background, borderColor: theme.colors.border }]}
+          >
+            {isDeletingThisItem ? (
+              <ActivityIndicator color={theme.colors.danger} size="small" />
+            ) : (
+              <AppText variant="caption" style={{ color: theme.colors.danger, fontSize: 11 }}>
+                Remove
               </AppText>
             )}
           </Pressable>

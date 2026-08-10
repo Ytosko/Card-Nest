@@ -78,17 +78,51 @@ export async function runConfiguredExtraction(cardId: string, userId: string, im
     }));
 
     const extracted = await extractBusinessCard(provider, model, localKey, imageInputs);
+    const classification = extracted.documentClassification ?? {
+      result: 'VALID_CARD',
+      confidence: 1.0,
+      reason: 'Valid contact card',
+    };
+
+    // Stage 2.5: Rejection of non-contact images (NOT_A_CARD)
+    if (classification.result === 'NOT_A_CARD') {
+      // 1. Delete temporary card record from Supabase database — ZERO garbage contacts created!
+      await supabase.from('cards').delete().eq('id', cardId);
+
+      // 2. Mark processing job as not_a_card
+      await supabase
+        .from('processing_jobs')
+        .update({
+          status: 'not_a_card',
+          completed_at: new Date().toISOString(),
+          last_error: classification.reason || 'This image does not appear to contain a contact card.',
+          result: { documentClassification: classification },
+        })
+        .eq('id', job.id);
+
+      if (__DEV__) {
+        console.warn(`[CardNest AI Pipeline] Image rejected as NOT_A_CARD`, { cardId, reason: classification.reason });
+      }
+
+      return {
+        success: false,
+        isNotACard: true,
+        classification,
+        error: classification.reason || 'This image does not appear to contain a contact card.',
+      };
+    }
 
     // Stage 3: Normalize Contact Data & Structural Metadata
     const primaryPhoneItem = extracted.phones.find((p) => p.isPrimary) || extracted.phones[0];
     const primaryEmailItem = extracted.emails.find((e) => e.isPrimary) || extracted.emails[0];
+    const isUncertain = classification.result === 'UNCERTAIN_CARD';
 
     const values = {
       display_name:
         extracted.displayName ||
         [extracted.firstName, extracted.middleName, extracted.lastName].filter(Boolean).join(' ') ||
         extracted.company ||
-        'New business card',
+        (isUncertain ? 'Uncertain contact note' : 'New business card'),
       first_name: extracted.firstName || null,
       middle_name: extracted.middleName || null,
       last_name: extracted.lastName || null,
@@ -109,14 +143,21 @@ export async function runConfiguredExtraction(cardId: string, userId: string, im
       extraction_provider: provider,
       extraction_model: model,
       extraction_confidence: extracted.confidence,
-      extraction_quality: { reviewed: false, failed: false, source_count: imageUris.length },
-      // Successful extractions save directly as visible contacts — review/editing is optional.
-      status: 'ready' as const,
+      extraction_quality: {
+        reviewed: false,
+        failed: false,
+        needsReview: isUncertain,
+        documentClassification: classification,
+        source_count: imageUris.length,
+      },
+      // Uncertain extractions require user confirmation/review; Valid extractions save as ready.
+      status: (isUncertain ? 'review' : 'ready') as 'review' | 'ready',
     };
 
     if (__DEV__) {
       console.log(`[CardNest AI Pipeline] Contact normalized`, {
         cardId,
+        classification: classification.result,
         phoneCount: extracted.phones.length,
         emailCount: extracted.emails.length,
         hasPrimaryPhone: Boolean(values.primary_phone),
@@ -124,7 +165,7 @@ export async function runConfiguredExtraction(cardId: string, userId: string, im
       });
     }
 
-    // Stage 4: Persist Structured Contact Record (saved directly, editable afterwards)
+    // Stage 4: Persist Structured Contact Record
     const { data: existing, error: existingError } = await supabase
       .from('cards')
       .select('*')
@@ -208,17 +249,21 @@ export async function runConfiguredExtraction(cardId: string, userId: string, im
     await supabase
       .from('processing_jobs')
       .update({
-        status: 'synced',
+        status: isUncertain ? 'needs_review' : 'synced',
         completed_at: new Date().toISOString(),
-        result: { confidence: extracted.confidence },
+        result: { confidence: extracted.confidence, documentClassification: classification },
       })
       .eq('id', job.id);
 
     if (__DEV__) {
-      console.log(`[CardNest AI Pipeline] Contact saved`, { cardId, status: 'ready' });
+      console.log(`[CardNest AI Pipeline] Contact saved`, { cardId, status: values.status, classification: classification.result });
     }
 
-    return true;
+    return {
+      success: true,
+      needsReview: isUncertain,
+      classification,
+    };
   } catch (error) {
     const modelGone = error instanceof AiExtractionError && error.code === 'AI_MODEL_UNAVAILABLE';
     if (modelGone) {

@@ -19,12 +19,16 @@ export default function CaptureSavedScreen() {
 
   const isQueued = state === 'queued';
   const isUploading = state === 'uploading';
-  const isProcessing = state === 'processing';
+  const isProcessing = state === 'processing' || state === 'validating';
   const isSynced = state === 'synced';
   const isFailed = state === 'failed';
+  const isNeedsReview = state === 'needs_review';
+  const isNotCard = state === 'not_a_card';
 
   // Progression steps copy
   const getStatusTitle = () => {
+    if (isNotCard) return "This doesn't look like a contact card";
+    if (isNeedsReview) return 'Not sure this is a contact card';
     if (isQueued) return 'Saving card…';
     if (isUploading) return 'Uploading securely…';
     if (isProcessing) return 'Reading your card…';
@@ -33,9 +37,11 @@ export default function CaptureSavedScreen() {
   };
 
   const getStatusBody = () => {
+    if (isNotCard) return "We couldn't find enough contact information in this image.";
+    if (isNeedsReview) return "We found some contact information, but this image doesn't clearly look like a business or contact card.";
     if (isQueued) return 'Securing photos in your local queue.';
     if (isUploading) return 'Sending encrypted images to Card Nest servers.';
-    if (isProcessing) return 'AI is organizing contact details from your card.';
+    if (isProcessing) return 'AI is classifying and organizing contact details.';
     if (isFailed)
       return (
         item?.lastError ||
@@ -53,7 +59,9 @@ export default function CaptureSavedScreen() {
         style={[
           styles.icon,
           {
-            backgroundColor: isFailed
+            backgroundColor: isNotCard
+              ? theme.colors.dangerSoft
+              : isNeedsReview || isFailed
               ? theme.colors.warningSoft
               : isSynced
               ? theme.colors.successSoft
@@ -64,8 +72,22 @@ export default function CaptureSavedScreen() {
           <ActivityIndicator color={theme.colors.primary} size="large" />
         ) : (
           <MaterialCommunityIcons
-            color={isFailed ? theme.colors.warning : theme.colors.success}
-            name={isFailed ? 'cloud-alert-outline' : 'cloud-check-outline'}
+            color={
+              isNotCard
+                ? theme.colors.danger
+                : isNeedsReview || isFailed
+                ? theme.colors.warning
+                : theme.colors.success
+            }
+            name={
+              isNotCard
+                ? 'file-cancel-outline'
+                : isNeedsReview
+                ? 'file-question-outline'
+                : isFailed
+                ? 'cloud-alert-outline'
+                : 'cloud-check-outline'
+            }
             size={48}
           />
         )}
@@ -81,7 +103,7 @@ export default function CaptureSavedScreen() {
       </View>
 
       {/* Progress Steps Indicator */}
-      {!isSynced && !isFailed ? (
+      {!isSynced && !isFailed && !isNeedsReview && !isNotCard ? (
         <View
           style={[
             styles.stepsContainer,
@@ -89,14 +111,20 @@ export default function CaptureSavedScreen() {
           ]}>
           <StepRow active={isQueued || isUploading || isProcessing} done={isUploading || isProcessing} label="1. Saving card" />
           <StepRow active={isUploading || isProcessing} done={isProcessing} label="2. Uploading securely" />
-          <StepRow active={isProcessing} done={false} label="3. Reading card & organizing" />
+          <StepRow active={isProcessing} done={false} label="3. Classifying & extracting" />
         </View>
       ) : null}
 
       <View style={styles.actions}>
-        {isSynced || !item ? (
+        {isSynced || (!item && !isNotCard) ? (
           <AppButton onPress={() => router.replace({ pathname: '/(app)/cards/[id]', params: { id } })}>
             View contact
+          </AppButton>
+        ) : null}
+
+        {isNeedsReview ? (
+          <AppButton onPress={() => router.replace({ pathname: '/(app)/cards/[id]', params: { id } })}>
+            Review anyway
           </AppButton>
         ) : null}
 
@@ -106,15 +134,28 @@ export default function CaptureSavedScreen() {
           </AppButton>
         ) : null}
 
-        <AppButton
-          onPress={() => router.replace('/(app)/(tabs)')}
-          variant={isSynced || isFailed ? 'secondary' : 'primary'}>
-          Go to contacts
-        </AppButton>
-        
-        <AppButton onPress={() => router.replace('/(app)/(tabs)/scan')} variant="secondary">
-          Scan another card
-        </AppButton>
+        {isNotCard ? (
+          <>
+            <AppButton onPress={() => router.replace('/(app)/(tabs)/scan')}>
+              Try another photo
+            </AppButton>
+            <AppButton onPress={() => router.replace('/(app)/(tabs)')} variant="secondary">
+              Cancel
+            </AppButton>
+          </>
+        ) : (
+          <>
+            <AppButton
+              onPress={() => router.replace('/(app)/(tabs)')}
+              variant={isSynced || isFailed || isNeedsReview ? 'secondary' : 'primary'}>
+              Go to contacts
+            </AppButton>
+            
+            <AppButton onPress={() => router.replace('/(app)/(tabs)/scan')} variant="secondary">
+              {isNeedsReview ? 'Try another photo' : 'Scan another card'}
+            </AppButton>
+          </>
+        )}
       </View>
     </SafeAreaView>
   );

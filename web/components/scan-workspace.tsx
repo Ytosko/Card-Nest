@@ -12,6 +12,7 @@ type Side = 'front' | 'back';
 type Prepared = { side: Side; name: string; original: string; ai: string };
 type ExtractionMeta = { provider?: string; model?: string };
 type Result = {
+  documentClassification?: { result: 'VALID_CARD' | 'UNCERTAIN_CARD' | 'NOT_A_CARD'; confidence: number; reason: string };
   displayName: string; firstName: string; middleName: string; lastName: string;
   company: string; jobTitle: string; department: string;
   emails: { email: string; label: string; isPrimary: boolean }[];
@@ -98,6 +99,16 @@ export function ScanWorkspace() {
     try {
       const response = await fetch('/api/app/extract', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ images }) });
       const data = await response.json(); if (!response.ok || !data.ok) throw new Error(data.message ?? 'AI extraction failed.');
+      const classification = data.result?.documentClassification;
+      if (classification?.result === 'NOT_A_CARD') {
+        setMessage("This doesn't look like a contact card. We couldn't find enough contact information in this image.");
+        setResult(null);
+        setMeta({});
+        return;
+      }
+      if (classification?.result === 'UNCERTAIN_CARD') {
+        setMessage("Not sure this is a contact card. We found some contact information, but this image doesn't clearly look like a business or contact card.");
+      }
       setResult(data.result); setMeta({ provider: data.provider, model: data.model });
     } catch (error) { setMessage(error instanceof Error ? error.message : 'AI extraction failed.'); }
     finally { setBusy(false); }

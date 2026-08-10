@@ -71,10 +71,65 @@ describe('validateExtractionResponse', () => {
   });
 });
 
+describe('documentClassification & VALID_CARD / UNCERTAIN_CARD / NOT_A_CARD', () => {
+  it('defaults documentClassification to VALID_CARD if omitted', () => {
+    const result = extractedCardSchema.parse({ confidence: 0.85 });
+    expect(result.documentClassification.result).toBe('VALID_CARD');
+    expect(result.documentClassification.confidence).toBe(1.0);
+  });
+
+  it('validates explicit VALID_CARD classification', () => {
+    const result = extractedCardSchema.parse({
+      documentClassification: {
+        result: 'VALID_CARD',
+        confidence: 0.98,
+        reason: 'Standard visiting card with name and phone',
+      },
+      displayName: 'Alice Engineer',
+      phones: [{ number: '+15551234', label: 'Work', service: '', serviceLabel: '', isPrimary: true }],
+      confidence: 0.95,
+    });
+    expect(result.documentClassification.result).toBe('VALID_CARD');
+    expect(result.documentClassification.reason).toContain('Standard visiting card');
+  });
+
+  it('validates explicit UNCERTAIN_CARD classification for blurry/handwritten cards', () => {
+    const result = extractedCardSchema.parse({
+      documentClassification: {
+        result: 'UNCERTAIN_CARD',
+        confidence: 0.65,
+        reason: 'Handwritten note with phone number',
+      },
+      displayName: 'Bob Note',
+      phones: [{ number: '+8801711223344', label: 'Mobile', service: '', serviceLabel: '', isPrimary: true }],
+      confidence: 0.6,
+    });
+    expect(result.documentClassification.result).toBe('UNCERTAIN_CARD');
+    expect(result.documentClassification.confidence).toBe(0.65);
+  });
+
+  it('validates explicit NOT_A_CARD classification for non-contact images', () => {
+    const result = extractedCardSchema.parse({
+      documentClassification: {
+        result: 'NOT_A_CARD',
+        confidence: 0.99,
+        reason: 'Landscape photo containing no contact details',
+      },
+      rawText: '',
+      confidence: 0.1,
+    });
+    expect(result.documentClassification.result).toBe('NOT_A_CARD');
+    expect(result.documentClassification.reason).toContain('Landscape photo');
+  });
+});
+
 describe('extractionPrompt', () => {
-  it('includes multilingual guidelines and phone preservation instructions', () => {
+  it('includes multilingual guidelines, document classification rules, and phone preservation instructions', () => {
     expect(extractionPrompt.toLowerCase()).toContain('multilingual');
     expect(extractionPrompt).toContain('Bengali');
+    expect(extractionPrompt).toContain('VALID_CARD');
+    expect(extractionPrompt).toContain('UNCERTAIN_CARD');
+    expect(extractionPrompt).toContain('NOT_A_CARD');
     expect(extractionPrompt).toContain('transliteration');
     expect(extractionPrompt).toContain('MUST NOT be translated');
   });

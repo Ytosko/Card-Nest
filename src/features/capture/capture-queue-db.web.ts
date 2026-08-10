@@ -1,4 +1,12 @@
-export type CaptureQueueState = 'queued' | 'uploading' | 'processing' | 'synced' | 'failed';
+export type CaptureQueueState =
+  | 'queued'
+  | 'validating'
+  | 'uploading'
+  | 'processing'
+  | 'synced'
+  | 'failed'
+  | 'needs_review'
+  | 'not_a_card';
 export type CaptureQueueItem = {
   id: string;
   userId: string;

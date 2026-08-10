@@ -48,7 +48,25 @@ export const extractedEmailItemSchema = z.union([
 export type ExtractedPhoneItem = z.infer<typeof extractedPhoneItemSchema>;
 export type ExtractedEmailItem = z.infer<typeof extractedEmailItemSchema>;
 
+export const documentClassificationResultSchema = z.enum(['VALID_CARD', 'UNCERTAIN_CARD', 'NOT_A_CARD']);
+export type DocumentClassificationResult = z.infer<typeof documentClassificationResultSchema>;
+
+export const documentClassificationSchema = z
+  .object({
+    result: documentClassificationResultSchema.default('VALID_CARD'),
+    confidence: z.number().min(0).max(1).default(1.0),
+    reason: z.string().default(''),
+  })
+  .default({
+    result: 'VALID_CARD',
+    confidence: 1.0,
+    reason: 'Valid contact card',
+  });
+
+export type DocumentClassification = z.infer<typeof documentClassificationSchema>;
+
 export const extractedCardSchema = z.object({
+  documentClassification: documentClassificationSchema,
   displayName: z.string().default(''),
   firstName: z.string().default(''),
   middleName: z.string().default(''),

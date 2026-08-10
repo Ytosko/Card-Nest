@@ -180,23 +180,57 @@ export function CaptureQueueProvider({ children }: PropsWithChildren) {
         await updateQueueItem(item.id, 'processing', { attemptCount: attempt, lastError: null, nextRetryAt: null });
         await refresh();
 
-        const extracted = await runConfiguredExtraction(
+        const runResult = await runConfiguredExtraction(
           item.cardId,
           user.id,
           sides.map((captured) => captured.uri)
         );
 
-        if (!extracted) {
-          await updateQueueItem(item.id, 'failed', {
+        if (typeof runResult === 'boolean') {
+          if (!runResult) {
+            await updateQueueItem(item.id, 'failed', {
+              attemptCount: attempt,
+              lastError: 'Could not extract card details. Check AI settings or connection and retry.',
+              nextRetryAt: null,
+            });
+            return false;
+          } else {
+            await updateQueueItem(item.id, 'synced', { attemptCount: attempt, lastError: null, nextRetryAt: null });
+            return true;
+          }
+        }
+
+        if (runResult.isNotACard) {
+          // Rejection state: not a contact card. Do NOT retry automatically.
+          await updateQueueItem(item.id, 'not_a_card', {
             attemptCount: attempt,
-            lastError: 'Could not extract card details. Check AI settings or connection and retry.',
+            lastError: runResult.error || 'This image does not appear to contain a contact card.',
             nextRetryAt: null,
           });
           return false;
-        } else {
+        }
+
+        if (runResult.needsReview) {
+          // Held for user confirmation / review
+          await updateQueueItem(item.id, 'needs_review', {
+            attemptCount: attempt,
+            lastError: runResult.classification?.reason || 'We found some contact info, but this image does not clearly look like a contact card.',
+            nextRetryAt: null,
+          });
+          return true;
+        }
+
+        if (runResult.success) {
           await updateQueueItem(item.id, 'synced', { attemptCount: attempt, lastError: null, nextRetryAt: null });
           return true;
         }
+
+        await updateQueueItem(item.id, 'failed', {
+          attemptCount: attempt,
+          lastError: runResult.error || 'Could not extract card details.',
+          nextRetryAt: null,
+        });
+        return false;
       } catch (catchedError) {
         const delayMinutes = Math.min(2 ** Math.min(attempt, 6), 60);
         const errMessage =

@@ -3,7 +3,15 @@ import { Platform } from 'react-native';
 import * as NativeDb from './capture-queue-db.native';
 import * as WebDb from './capture-queue-db.web';
 
-export type CaptureQueueState = 'queued' | 'uploading' | 'processing' | 'synced' | 'failed';
+export type CaptureQueueState =
+  | 'queued'
+  | 'validating'
+  | 'uploading'
+  | 'processing'
+  | 'synced'
+  | 'failed'
+  | 'needs_review'
+  | 'not_a_card';
 export type CaptureQueueItem = {
   id: string;
   userId: string;

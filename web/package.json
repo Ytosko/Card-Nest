@@ -1,6 +1,6 @@
 {
   "name": "card-nest-web",
-  "version": "1.0.4-beta-f0D2X",
+  "version": "1.0.5-beta-f0D3X",
   "private": true,
   "scripts": {
     "dev": "next dev",
