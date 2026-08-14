@@ -134,8 +134,25 @@ describe('Queue Reconciliation & Retry Race Protection (Bug 2)', () => {
                   display_name: 'Jane Doe',
                   primary_email: 'jane@example.com',
                   primary_phone: '+1234567890',
+                  extraction_quality: { failed: false },
                 },
               ],
+              error: null,
+            })),
+          })),
+        } as any;
+      }
+      if (table === 'processing_jobs') {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              in: vi.fn(async () => ({
+                data: [{ card_id: 'card-3', status: 'synced' }],
+                error: null,
+              })),
+            })),
+            in: vi.fn(async () => ({
+              data: [{ card_id: 'card-3', status: 'synced' }],
               error: null,
             })),
           })),
@@ -206,11 +223,27 @@ describe('Queue Reconciliation & Retry Race Protection (Bug 2)', () => {
         return {
           select: vi.fn(() => ({
             in: vi.fn(async () => ({
-              data: [{ id: 'card-5', status: 'ready', display_name: 'Existing Contact' }],
+              data: [{ id: 'card-5', status: 'ready', display_name: 'Existing Contact', extraction_quality: { failed: false } }],
               error: null,
             })),
           })),
           upsert: upsertSpy,
+        } as any;
+      }
+      if (table === 'processing_jobs') {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              in: vi.fn(async () => ({
+                data: [{ card_id: 'card-5', status: 'synced' }],
+                error: null,
+              })),
+            })),
+            in: vi.fn(async () => ({
+              data: [{ card_id: 'card-5', status: 'synced' }],
+              error: null,
+            })),
+          })),
         } as any;
       }
       return {
@@ -226,5 +259,61 @@ describe('Queue Reconciliation & Retry Race Protection (Bug 2)', () => {
     await reconcileQueueItems(userId);
 
     expect(upsertSpy).not.toHaveBeenCalled();
+  });
+
+  it('MUST NOT repair to synced when only intermediate card exists (status review/failed) without synced job', async () => {
+    const captureId = 'cap-6';
+    const cardId = 'card-6';
+    await insertQueueItem({ id: captureId, userId, cardId, frontUri: 'file:///front.jpg', backUri: null });
+    await updateQueueItem(captureId, 'failed', { attemptCount: 1, lastError: 'Interrupted', nextRetryAt: null });
+
+    vi.spyOn(supabase, 'from').mockImplementation((table: string) => {
+      if (table === 'cards') {
+        return {
+          select: vi.fn(() => ({
+            in: vi.fn(async () => ({
+              data: [
+                {
+                  id: 'card-6',
+                  status: 'review',
+                  display_name: 'Unfinished Card',
+                  extraction_quality: { failed: true },
+                },
+              ],
+              error: null,
+            })),
+          })),
+        } as any;
+      }
+      if (table === 'processing_jobs') {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              in: vi.fn(async () => ({
+                data: [{ card_id: 'card-6', status: 'failed' }],
+                error: null,
+              })),
+            })),
+            in: vi.fn(async () => ({
+              data: [{ card_id: 'card-6', status: 'failed' }],
+              error: null,
+            })),
+          })),
+        } as any;
+      }
+      return {
+        select: vi.fn(() => ({
+          eq: vi.fn(() => ({
+            in: vi.fn(async () => ({ data: [], error: null })),
+          })),
+          in: vi.fn(async () => ({ data: [], error: null })),
+        })),
+      } as any;
+    });
+
+    const reconciled = await reconcileQueueItems(userId);
+    const item = reconciled.find((i) => i.id === captureId);
+
+    expect(item?.state).toBe('failed');
   });
 });

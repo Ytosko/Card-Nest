@@ -1,6 +1,6 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Stack } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { FlatList, Modal, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -9,9 +9,7 @@ import { AppText } from '@/src/components/ui/app-text';
 import { AppTextField } from '@/src/components/ui/app-text-field';
 import { AuthNotice } from '@/src/features/auth/components/auth-notice';
 import {
-  getProviderCredentialState,
   getProviderKey,
-  getServerCredentialStatus,
   removeServerCredential,
   saveServerCredential,
   type AiProvider,
@@ -25,8 +23,8 @@ import {
   validateModel,
   type AiModelInfo,
 } from '@/src/features/ai/model-catalog';
+import { useAIConfig } from '@/src/features/ai/ai-config-provider';
 import { useAuth } from '@/src/features/auth/auth-provider';
-import { supabase } from '@/src/lib/supabase/client';
 import { useAppTheme } from '@/src/theme/theme-provider';
 
 function providerLabel(provider: AiProvider) {
@@ -36,12 +34,9 @@ function providerLabel(provider: AiProvider) {
 export default function AiSettingsScreen() {
   const theme = useAppTheme();
   const { user } = useAuth();
+  const aiConfig = useAIConfig();
 
-  const [provider, setProvider] = useState<AiProvider>('openai');
-  const [providerResolved, setProviderResolved] = useState(false);
-  const [keySuffix, setKeySuffix] = useState<string | null>(null);
-  const [keyLast4, setKeyLast4] = useState<string | null>(null);
-  const [hasServerKey, setHasServerKey] = useState(false);
+  const [provider, setProvider] = useState<AiProvider>(aiConfig.activeProvider);
   const [models, setModels] = useState<AiModelInfo[]>([]);
   const [selectedModel, setSelectedModel] = useState('');
   const [modelFilter, setModelFilter] = useState('');
@@ -59,12 +54,35 @@ export default function AiSettingsScreen() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const autoSelected = useRef(false);
+  // Keep local provider tab synced with aiConfig activeProvider on mount
+  useEffect(() => {
+    if (aiConfig.status === 'ready') {
+      setProvider(aiConfig.activeProvider);
+    }
+  }, [aiConfig.status, aiConfig.activeProvider]);
+
+  const hasServerKey = useMemo(() => {
+    return provider === 'gemini' ? aiConfig.geminiConnected : aiConfig.openaiConnected;
+  }, [aiConfig.geminiConnected, aiConfig.openaiConnected, provider]);
+
+  const keyLast4 = useMemo(() => {
+    return provider === 'gemini' ? aiConfig.geminiKeyLast4 : aiConfig.openaiKeyLast4;
+  }, [aiConfig.geminiKeyLast4, aiConfig.openaiKeyLast4, provider]);
+
+  const currentSelectedModel = useMemo(() => {
+    return provider === 'gemini' ? aiConfig.geminiSelectedModel : aiConfig.openaiSelectedModel;
+  }, [aiConfig.geminiSelectedModel, aiConfig.openaiSelectedModel, provider]);
+
+  useEffect(() => {
+    if (currentSelectedModel) {
+      setSelectedModel(currentSelectedModel);
+    }
+  }, [currentSelectedModel]);
 
   const maskedKeyDisplay = useMemo(() => {
-    if (!hasServerKey && !keyLast4 && !keySuffix) return null;
-    return `••••••••${keyLast4 || keySuffix || '••••'}`;
-  }, [hasServerKey, keyLast4, keySuffix]);
+    if (!hasServerKey && !keyLast4) return null;
+    return `••••••••${keyLast4 || '••••'}`;
+  }, [hasServerKey, keyLast4]);
 
   const selectedModelInfo = useMemo(() => models.find((m) => m.id === selectedModel) ?? null, [models, selectedModel]);
   const selectedModelMissing = useMemo(
@@ -74,20 +92,10 @@ export default function AiSettingsScreen() {
 
   const persistSelection = useCallback(
     async (prov: AiProvider, modelId: string) => {
-      if (!user) return;
-      const updatePayload: Record<string, any> = {
-        user_id: user.id,
-        selected_ai_provider: prov,
-        selected_ai_model: modelId,
-        updated_at: new Date().toISOString(),
-      };
-      if (prov === 'gemini') updatePayload.gemini_selected_model = modelId;
-      if (prov === 'openai') updatePayload.openai_selected_model = modelId;
-
-      const { error: saveError } = await supabase.from('user_preferences').upsert(updatePayload);
-      if (saveError) throw saveError;
+      setSelectedModel(modelId);
+      await aiConfig.setSelectedModel(prov, modelId);
     },
-    [user]
+    [aiConfig]
   );
 
   /** Loads models from server via Edge Function; an account-level selection is saved. */
@@ -109,41 +117,9 @@ export default function AiSettingsScreen() {
     [persistSelection, selectedModel]
   );
 
-  // Opening the screen: resolve the active/connected provider automatically so a
-  // configured account shows its connected state immediately.
+  // Load models whenever the provider changes and key is available
   useEffect(() => {
-    if (!user) return;
-    let active = true;
-
-    void (async () => {
-      const [{ data: pref }, status] = await Promise.all([
-        supabase.from('user_preferences').select('*').eq('user_id', user.id).maybeSingle(),
-        getServerCredentialStatus(),
-      ]);
-      if (!active) return;
-
-      const preferred =
-        pref?.selected_ai_provider === 'openai' || pref?.selected_ai_provider === 'gemini' ? pref.selected_ai_provider : null;
-
-      let initial: AiProvider = 'openai';
-      if (preferred && status[preferred]?.connected) initial = preferred;
-      else if (status.gemini?.connected && !status.openai?.connected) initial = 'gemini';
-      else if (status.openai?.connected) initial = 'openai';
-      else if (preferred) initial = preferred;
-
-      autoSelected.current = true;
-      setProvider(initial);
-      setProviderResolved(true);
-    })();
-
-    return () => {
-      active = false;
-    };
-  }, [user]);
-
-  // Load connection + models whenever the (resolved) provider changes.
-  useEffect(() => {
-    if (!user || !providerResolved) return;
+    if (!user || aiConfig.status !== 'ready') return;
     let active = true;
     setSetupKeyInput('');
     setModels([]);
@@ -152,36 +128,13 @@ export default function AiSettingsScreen() {
     setError(null);
     setNotice(null);
 
-    void (async () => {
-      const { data: pref } = await supabase.from('user_preferences').select('*').eq('user_id', user.id).maybeSingle();
-      if (!active) return;
-      const savedModel =
-        (provider === 'gemini' ? pref?.gemini_selected_model : pref?.openai_selected_model) ||
-        (pref?.selected_ai_provider === provider ? pref?.selected_ai_model : '') ||
-        '';
-      setSelectedModel(savedModel);
-
-      const credInfo = await getProviderCredentialState(provider);
-      if (!active) return;
-      if (credInfo.state === 'ready') {
-        setHasServerKey(true);
-        setKeyLast4(credInfo.keyLast4 || null);
-        setKeySuffix(null);
-        await loadModels(provider, { currentSelection: savedModel }).catch(() => undefined);
-      } else if (credInfo.state === 'network_error') {
-        setHasServerKey(false);
-        setError('Unable to check AI connection right now. Please check your network.');
-      } else {
-        setHasServerKey(false);
-        setKeySuffix(null);
-      }
-    })();
-
+    if (hasServerKey) {
+      void loadModels(provider, { currentSelection: currentSelectedModel }).catch(() => undefined);
+    }
     return () => {
       active = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [provider, providerResolved, user]);
+  }, [aiConfig.status, currentSelectedModel, hasServerKey, loadModels, provider, user]);
 
   const applyNewKey = useCallback(
     async (rawKey: string) => {
@@ -189,7 +142,7 @@ export default function AiSettingsScreen() {
       if (!newKey) throw new Error(`Paste your ${providerLabel(provider)} API key first.`);
 
       await saveServerCredential(provider, newKey);
-      setHasServerKey(true);
+      await aiConfig.refresh();
 
       const available = await loadModels(provider, { forceRefresh: true, currentSelection: selectedModel });
       if (selectedModel && !available.some((m) => m.id === selectedModel)) {
@@ -199,7 +152,7 @@ export default function AiSettingsScreen() {
         setNotice(`Connected to ${providerLabel(provider)}. ${available.length} compatible models available.`);
       }
     },
-    [loadModels, provider, selectedModel]
+    [aiConfig, loadModels, provider, selectedModel]
   );
 
   async function handleConnect() {
@@ -309,8 +262,7 @@ export default function AiSettingsScreen() {
     setNotice(null);
     try {
       await removeServerCredential(provider);
-      setHasServerKey(false);
-      setKeySuffix(null);
+      await aiConfig.refresh();
       setModels([]);
       setPickerOpen(false);
       setNotice(`${providerLabel(provider)} disconnected. Your model choice is kept for when you reconnect.`);
@@ -331,8 +283,22 @@ export default function AiSettingsScreen() {
     <View style={{ gap: theme.spacing[5] }}>
       {/* Provider Switcher */}
       <View style={styles.providers}>
-        <ProviderButton active={provider === 'gemini'} label="Gemini" onPress={() => setProvider('gemini')} />
-        <ProviderButton active={provider === 'openai'} label="OpenAI" onPress={() => setProvider('openai')} />
+        <ProviderButton
+          active={provider === 'gemini'}
+          label="Gemini"
+          onPress={() => {
+            setProvider('gemini');
+            void aiConfig.setActiveProvider('gemini');
+          }}
+        />
+        <ProviderButton
+          active={provider === 'openai'}
+          label="OpenAI"
+          onPress={() => {
+            setProvider('openai');
+            void aiConfig.setActiveProvider('openai');
+          }}
+        />
       </View>
 
       {notice ? <AuthNotice message={notice} tone="success" /> : null}

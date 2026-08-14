@@ -240,6 +240,8 @@ Multilingual Rules:
 
 function classifyProviderError(status: number, errText: string): string {
   const lower = errText.toLowerCase();
+
+  // 1. Auth failure: 401, 403, or explicit invalid API key response
   if (
     status === 401 ||
     status === 403 ||
@@ -250,19 +252,27 @@ function classifyProviderError(status: number, errText: string): string {
   ) {
     return 'AI_AUTH_FAILED';
   }
-  if (status === 429 || lower.includes('quota') || lower.includes('rate_limit')) {
+
+  // 2. Rate limit / quota
+  if (status === 429 || lower.includes('quota') || lower.includes('rate_limit') || lower.includes('resource_exhausted')) {
     return 'AI_RATE_LIMITED';
   }
+
+  // 3. Model not found or unsupported (e.g. invalid model path or 404)
   if (
+    status === 404 ||
     lower.includes('model_not_found') ||
     lower.includes('is not found') ||
     lower.includes('was not found') ||
+    lower.includes('not supported') ||
     lower.includes('decommissioned') ||
     lower.includes('deprecated')
   ) {
-    return 'AI_MODEL_UNAVAILABLE';
+    return 'AI_MODEL_UNSUPPORTED';
   }
-  if (status === 400) return 'AI_MODEL_UNSUPPORTED';
+
+  // 4. General 400 malformed request / provider error
+  if (status === 400) return 'AI_PROVIDER_ERROR';
   return 'AI_PROVIDER_ERROR';
 }
 
@@ -341,6 +351,16 @@ Deno.serve(async (request) => {
       return json({ ok: false, code: 'IMAGE_READ_ERROR', message: "We couldn't process this image. Please try another photo." }, 200);
     }
 
+function normalizeApiKey(input: unknown): string {
+  if (typeof input !== 'string') return '';
+  let key = input.trim();
+  if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
+    key = key.slice(1, -1).trim();
+  }
+  key = key.replace(/[\r\n\t]/g, '').trim();
+  return key;
+}
+
     // Fetch user's plaintext credentials server-side for this provider
     const { data: credRow, error: credError } = await adminClient
       .from('user_ai_credentials')
@@ -349,7 +369,7 @@ Deno.serve(async (request) => {
       .eq('provider', provider)
       .maybeSingle();
 
-    const apiKey = credRow?.api_key?.trim();
+    const apiKey = normalizeApiKey(credRow?.api_key);
 
     console.log(
       `[CardNest AI Pipeline] ai_config_loaded`,

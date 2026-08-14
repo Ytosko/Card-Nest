@@ -1,0 +1,16 @@
+{
+  "version": "2.0.0-MXJ7",
+  "versionCode": 24,
+  "releaseDate": "2026-08-14T22:30:00Z",
+  "downloadUrl": "https://github.com/Ytosko/Card-Nest/releases/download/v2.0.0-MXJ7/Card-Nest-2.0.0-MXJ7-android.apk",
+  "aabUrl": "https://github.com/Ytosko/Card-Nest/releases/download/v2.0.0-MXJ7/Card-Nest-2.0.0-MXJ7-android.aab",
+  "changelog": [
+    "Improved AI-powered business/contact card extraction",
+    "Account-synced Gemini/OpenAI configuration",
+    "Reliable multi-phone/email/website contact persistence",
+    "Improved capture queue reliability and retry handling",
+    "Card Nest web application",
+    "General stability and synchronization improvements"
+  ],
+  "minSupportedVersion": "1.0.0"
+}

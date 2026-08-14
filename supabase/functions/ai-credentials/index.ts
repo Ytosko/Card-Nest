@@ -99,13 +99,16 @@ Deno.serve(async (request) => {
 
     const credentials: Record<string, { connected: boolean; keyLast4?: string; updatedAt: string; lastValidatedAt?: string }> = {};
     for (const row of rows || []) {
-      const last4 = row.key_last4 || (row.api_key ? row.api_key.trim().slice(-4) : undefined);
-      credentials[row.provider] = {
-        connected: true,
-        keyLast4: last4,
-        updatedAt: row.updated_at,
-        lastValidatedAt: row.last_validated_at,
-      };
+      const hasKey = Boolean(row.key_last4 || (row.api_key && typeof row.api_key === 'string' && row.api_key.trim().length > 0));
+      if (hasKey) {
+        const last4 = row.key_last4 || (row.api_key ? row.api_key.trim().slice(-4) : undefined);
+        credentials[row.provider] = {
+          connected: true,
+          keyLast4: last4,
+          updatedAt: row.updated_at,
+          lastValidatedAt: row.last_validated_at,
+        };
+      }
     }
 
     return json({ ok: true, credentials });
@@ -159,12 +162,21 @@ Deno.serve(async (request) => {
         return json({ ok: true, message: 'Provider key is valid.' });
       }
 
-      // Save plaintext key server-side
-      if (!apiKey || typeof apiKey !== 'string' || !apiKey.trim()) {
+function normalizeApiKey(input: unknown): string {
+  if (typeof input !== 'string') return '';
+  let key = input.trim();
+  if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
+    key = key.slice(1, -1).trim();
+  }
+  key = key.replace(/[\r\n\t]/g, '').trim();
+  return key;
+}
+
+      const cleanKey = normalizeApiKey(apiKey);
+      if (!cleanKey) {
         return json({ error: 'API key is required.' }, 400);
       }
 
-      const cleanKey = apiKey.trim();
       if (!skipTest) {
         const isValid = await testProviderKey(provider, cleanKey);
         if (!isValid) {

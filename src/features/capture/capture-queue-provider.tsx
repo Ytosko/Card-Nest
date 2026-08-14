@@ -90,22 +90,20 @@ export async function reconcileQueueItems(userId: string): Promise<CaptureQueueI
       const card = cardsMap.get(item.cardId);
       const job = jobsMap.get(item.cardId);
 
-      if (
+      const isCardReady = Boolean(
         card &&
-        (card.status === 'ready' ||
-          card.status === 'synced' ||
-          card.primary_email ||
-          card.primary_phone ||
-          (card.display_name && card.display_name !== 'New business card'))
-      ) {
+          (card.status === 'ready' || card.status === 'synced') &&
+          !(card as any).extraction_quality?.failed
+      );
+      const isJobSynced = Boolean(job && job.status === 'synced');
+
+      if (isCardReady && isJobSynced) {
         await updateQueueItem(item.id, 'synced', { lastError: null, nextRetryAt: null });
         if (__DEV__) {
           console.log(`[CardNest Queue Reconciliation] Repaired stale queue item ${item.id} to synced`, {
             cardId: item.cardId,
           });
         }
-      } else if (job && job.status === 'synced') {
-        await updateQueueItem(item.id, 'synced', { lastError: null, nextRetryAt: null });
       } else if (job && job.status === 'not_a_card') {
         await updateQueueItem(item.id, 'not_a_card', {
           lastError: job.last_error || 'This image does not appear to contain a contact card.',
@@ -274,6 +272,9 @@ export function CaptureQueueProvider({ children }: PropsWithChildren) {
 
         if (runResult.success) {
           await updateQueueItem(item.id, 'synced', { attemptCount: attempt, lastError: null, nextRetryAt: null });
+          if (__DEV__) {
+            console.log(`[CardNest Queue] queue_marked_synced`, { jobId: item.id, cardId: item.cardId });
+          }
           return true;
         }
 

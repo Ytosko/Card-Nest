@@ -22,6 +22,8 @@ export type AiErrorCode =
   | 'AI_IMAGE_PREP_FAILED'
   | 'AI_RESPONSE_INVALID'
   | 'AI_NETWORK_ERROR'
+  | 'CONTACT_SAVE_FAILED'
+  | 'CONTACT_NORMALIZATION_FAILED'
   | 'NETWORK_ERROR';
 
 /** Classifies a provider HTTP failure into a normalized Card Nest error code. */
@@ -359,13 +361,15 @@ export async function getServerCredentialStatus(): Promise<Record<string, { hasK
 
   if (!error && rows) {
     for (const row of rows) {
-      result[row.provider] = {
-        hasKey: true,
-        connected: true,
-        keyLast4: row.key_last4 || undefined,
-        updatedAt: row.updated_at,
-        lastValidatedAt: row.last_validated_at || undefined,
-      };
+      if (row.key_last4) {
+        result[row.provider] = {
+          hasKey: true,
+          connected: true,
+          keyLast4: row.key_last4,
+          updatedAt: row.updated_at,
+          lastValidatedAt: row.last_validated_at || undefined,
+        };
+      }
     }
   }
 

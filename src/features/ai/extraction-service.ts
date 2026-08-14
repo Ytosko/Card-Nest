@@ -3,6 +3,50 @@ import { checkSelectedModelAgainstCache, recordModelValidation } from '@/src/fea
 import { duplicateScore } from '@/src/features/cards/duplicate-score';
 import { supabase } from '@/src/lib/supabase/client';
 
+export function formatSupabaseError(err: unknown): { code?: string; message: string; details?: string; hint?: string } {
+  if (!err) return { message: 'Unknown database error' };
+  if (err instanceof Error) return { message: err.message };
+  if (typeof err === 'object') {
+    const obj = err as Record<string, any>;
+    const code = obj.code || obj.status;
+    const message = obj.message || obj.error_description || JSON.stringify(err);
+    const details = obj.details;
+    const hint = obj.hint;
+    return {
+      code: code ? String(code) : undefined,
+      message: String(message),
+      details: details ? String(details) : undefined,
+      hint: hint ? String(hint) : undefined,
+    };
+  }
+  return { message: String(err) };
+}
+
+function normalizePhoneLabel(input?: string | null): string {
+  if (!input) return 'mobile';
+  const val = input.trim().toLowerCase();
+  if (['mobile', 'work', 'home', 'fax', 'other'].includes(val)) return val;
+  if (val.includes('cell') || val.includes('phone')) return 'mobile';
+  if (val.includes('office') || val.includes('direct') || val.includes('biz')) return 'work';
+  return 'other';
+}
+
+function normalizeEmailLabel(input?: string | null): string {
+  if (!input) return 'work';
+  const val = input.trim().toLowerCase();
+  if (['work', 'personal', 'other'].includes(val)) return val;
+  if (val.includes('private') || val.includes('home')) return 'personal';
+  return 'other';
+}
+
+function normalizeWebsiteLabel(input?: string | null): string {
+  if (!input) return 'work';
+  const val = input.trim().toLowerCase();
+  if (['work', 'portfolio', 'social', 'other'].includes(val)) return val;
+  if (val.includes('linkedin') || val.includes('github') || val.includes('twitter') || val.includes('facebook')) return 'social';
+  return 'other';
+}
+
 export async function runConfiguredExtraction(cardId: string, userId: string, imageUris: string[]) {
   const { data: preference, error: preferenceError } = await supabase
     .from('user_preferences')
@@ -155,7 +199,7 @@ export async function runConfiguredExtraction(cardId: string, userId: string, im
     };
 
     if (__DEV__) {
-      console.log(`[CardNest AI Pipeline] Contact normalized`, {
+      console.log(`[CardNest AI Pipeline] contact_persist_started`, {
         cardId,
         classification: classification.result,
         phoneCount: extracted.phones.length,
@@ -166,85 +210,156 @@ export async function runConfiguredExtraction(cardId: string, userId: string, im
     }
 
     // Stage 4: Persist Structured Contact Record
-    const { data: existing, error: existingError } = await supabase
-      .from('cards')
-      .select('*')
-      .neq('id', cardId)
-      .neq('status', 'archived')
-      .limit(100);
+    try {
+      const { data: existing, error: existingError } = await supabase
+        .from('cards')
+        .select('*')
+        .neq('id', cardId)
+        .neq('status', 'archived')
+        .limit(100);
 
-    if (existingError) throw existingError;
-
-    const duplicate = existing
-      .map((card) => ({ card, score: duplicateScore(values, card) }))
-      .sort((a, b) => b.score - a.score)[0];
-
-    const { error: updateError } = await supabase
-      .from('cards')
-      .update({
-        ...values,
-        duplicate_of_id: duplicate && duplicate.score >= 0.78 ? duplicate.card.id : null,
-      })
-      .eq('id', cardId);
-
-    if (updateError) throw updateError;
-
-    // Persist all relational phone numbers (with service metadata) and email addresses
-    const relationDeletes = await Promise.all(
-      ['card_emails', 'card_phone_numbers', 'card_websites', 'card_addresses'].map((table) =>
-        supabase.from(table as 'card_emails').delete().eq('card_id', cardId)
-      )
-    );
-    const relationError = relationDeletes.find((result) => result.error)?.error;
-    if (relationError) throw relationError;
-
-    const relations = [];
-    for (const p of extracted.phones) {
-      if (p.number?.trim()) {
-        relations.push(
-          supabase.from('card_phone_numbers').insert({
-            user_id: userId,
-            card_id: cardId,
-            phone_number: p.number.trim(),
-            label: p.label || 'Mobile',
-            service: p.service || null,
-            service_label: p.serviceLabel || null,
-            is_primary: p.isPrimary ?? false,
-          })
-        );
+      if (existingError) {
+        const formatted = formatSupabaseError(existingError);
+        if (__DEV__) console.error(`[CardNest AI Pipeline] DB Duplicate Check Failed`, { operation: 'select', table: 'cards', ...formatted, cardId, userId });
+        throw new Error(`cards select: [${formatted.code || 'ERR'}] ${formatted.message}`);
       }
+
+      const duplicate = existing
+        .map((card) => ({ card, score: duplicateScore(values, card) }))
+        .sort((a, b) => b.score - a.score)[0];
+
+      const { error: updateError } = await supabase
+        .from('cards')
+        .update({
+          ...values,
+          duplicate_of_id: duplicate && duplicate.score >= 0.78 ? duplicate.card.id : null,
+        })
+        .eq('id', cardId);
+
+      if (updateError) {
+        const formatted = formatSupabaseError(updateError);
+        if (__DEV__) console.error(`[CardNest AI Pipeline] DB Card Update Failed`, { operation: 'update', table: 'cards', ...formatted, cardId, userId });
+        throw new Error(`cards update: [${formatted.code || 'ERR'}] ${formatted.message}`);
+      }
+
+      // Delete existing relations for this card before re-inserting to ensure clean sync state
+      const relationDeletes = await Promise.all([
+        supabase.from('card_emails').delete().eq('user_id', userId).eq('card_id', cardId),
+        supabase.from('card_phone_numbers').delete().eq('user_id', userId).eq('card_id', cardId),
+        supabase.from('card_websites').delete().eq('user_id', userId).eq('card_id', cardId),
+        supabase.from('card_addresses').delete().eq('user_id', userId).eq('card_id', cardId),
+      ]);
+      const relationError = relationDeletes.find((result) => result.error)?.error;
+      if (relationError) {
+        const formatted = formatSupabaseError(relationError);
+        if (__DEV__) console.error(`[CardNest AI Pipeline] DB Relation Delete Failed`, { operation: 'delete', table: 'relations', ...formatted, cardId, userId });
+        throw new Error(`relation delete: [${formatted.code || 'ERR'}] ${formatted.message}`);
+      }
+
+      const relations = [];
+      let phonePrimaryAssigned = false;
+      for (const p of extracted.phones) {
+        if (p.number?.trim()) {
+          const isPrimary = !phonePrimaryAssigned && Boolean(p.isPrimary);
+          if (isPrimary) phonePrimaryAssigned = true;
+
+          relations.push(
+            supabase.from('card_phone_numbers').upsert(
+              {
+                user_id: userId,
+                card_id: cardId,
+                phone_number: p.number.trim(),
+                label: normalizePhoneLabel(p.label),
+                service: p.service || null,
+                service_label: p.serviceLabel || null,
+                is_primary: isPrimary,
+              },
+              { onConflict: 'card_id, normalized_phone' }
+            )
+          );
+        }
+      }
+
+      let emailPrimaryAssigned = false;
+      for (const e of extracted.emails) {
+        if (e.email?.trim()) {
+          const isPrimary = !emailPrimaryAssigned && Boolean(e.isPrimary);
+          if (isPrimary) emailPrimaryAssigned = true;
+
+          relations.push(
+            supabase.from('card_emails').upsert(
+              {
+                user_id: userId,
+                card_id: cardId,
+                email: e.email.trim(),
+                label: normalizeEmailLabel(e.label),
+                is_primary: isPrimary,
+              },
+              { onConflict: 'card_id, normalized_email' }
+            )
+          );
+        }
+      }
+
+      let websitePrimaryAssigned = false;
+      for (const w of extracted.websites) {
+        if (w?.trim()) {
+          const isPrimary = !websitePrimaryAssigned;
+          if (isPrimary) websitePrimaryAssigned = true;
+
+          relations.push(
+            supabase.from('card_websites').upsert(
+              {
+                user_id: userId,
+                card_id: cardId,
+                url: w.trim(),
+                label: normalizeWebsiteLabel(null),
+                is_primary: isPrimary,
+              },
+              { onConflict: 'card_id, url' }
+            )
+          );
+        }
+      }
+
+      const relationResults = await Promise.all(relations);
+      const insertError = relationResults.find((result) => result.error)?.error;
+      if (insertError) {
+        const formatted = formatSupabaseError(insertError);
+        if (__DEV__) console.error(`[CardNest AI Pipeline] DB Relation Upsert Failed`, { operation: 'upsert', table: 'relations', ...formatted, cardId, userId });
+        throw new Error(`relation upsert: [${formatted.code || 'ERR'}] ${formatted.message}`);
+      }
+    } catch (saveErr) {
+      const formatted = formatSupabaseError(saveErr);
+      const detailStr = [formatted.code ? `[Code: ${formatted.code}]` : null, formatted.message, formatted.details ? `Details: ${formatted.details}` : null]
+        .filter(Boolean)
+        .join(' ');
+
+      throw new AiExtractionError('CONTACT_SAVE_FAILED', `Failed to save extracted contact to database: ${detailStr}`, {
+        provider,
+        model,
+        stage: 'contactPersistence',
+      });
     }
 
-    for (const e of extracted.emails) {
-      if (e.email?.trim()) {
-        relations.push(
-          supabase.from('card_emails').insert({
-            user_id: userId,
-            card_id: cardId,
-            email: e.email.trim(),
-            label: e.label || 'Work',
-            is_primary: e.isPrimary ?? false,
-          })
-        );
-      }
+    if (__DEV__) {
+      console.log(`[CardNest AI Pipeline] contact_save_succeeded`, {
+        contact_id_present: Boolean(cardId),
+        contact_status: values.status,
+      });
     }
 
-    for (const w of extracted.websites) {
-      if (w?.trim()) {
-        relations.push(
-          supabase.from('card_websites').insert({
-            user_id: userId,
-            card_id: cardId,
-            url: w.trim(),
-            is_primary: true,
-          })
-        );
+    // Invalidate TanStack Query Contacts cache immediately so new contact appears on index screen
+    try {
+      const { queryClient } = await import('@/src/lib/query-client');
+      const { cardKeys } = await import('@/src/features/cards/card-hooks');
+      await queryClient.invalidateQueries({ queryKey: cardKeys.all });
+      if (__DEV__) {
+        console.log(`[CardNest AI Pipeline] contacts_cache_invalidated`, { cardId });
       }
+    } catch (cacheErr) {
+      if (__DEV__) console.warn(`[CardNest AI Pipeline] Cache invalidation warning:`, cacheErr);
     }
-
-    const relationResults = await Promise.all(relations);
-    const insertError = relationResults.find((result) => result.error)?.error;
-    if (insertError) throw insertError;
 
     await supabase
       .from('processing_jobs')
@@ -256,7 +371,11 @@ export async function runConfiguredExtraction(cardId: string, userId: string, im
       .eq('id', job.id);
 
     if (__DEV__) {
-      console.log(`[CardNest AI Pipeline] Contact saved`, { cardId, status: values.status, classification: classification.result });
+      console.log(`[CardNest AI Pipeline] extraction_success`, {
+        cardId,
+        status: values.status,
+        classification: classification.result,
+      });
     }
 
     return {
