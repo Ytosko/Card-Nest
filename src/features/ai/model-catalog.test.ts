@@ -14,7 +14,8 @@ vi.mock('expo-secure-store', () => ({
   getItemAsync: vi.fn(),
   setItemAsync: vi.fn(),
   deleteItemAsync: vi.fn(),
-  WHEN_UNLOCKED_THIS_DEVICE_ONLY: 1,
+  AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 1,
+  WHEN_UNLOCKED_THIS_DEVICE_ONLY: 0,
 }));
 
 vi.mock('expo-file-system', () => {

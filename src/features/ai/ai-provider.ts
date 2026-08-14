@@ -70,6 +70,21 @@ const keyNames: Record<AiProvider, string> = {
   gemini: 'cardnest.ai.gemini.api-key.v1',
 };
 
+const legacyKeyNames: Record<AiProvider, string[]> = {
+  openai: [
+    'cardnest.ai.openai.api-key',
+    'cardnest_openai_api_key',
+    'cardnest_openai_key',
+    'openai_api_key',
+  ],
+  gemini: [
+    'cardnest.ai.gemini.api-key',
+    'cardnest_gemini_api_key',
+    'cardnest_gemini_key',
+    'gemini_api_key',
+  ],
+};
+
 const jsonSchema = {
   type: 'object',
   additionalProperties: false,
@@ -178,22 +193,192 @@ Multilingual & Field extraction rules:
 6. Always store the complete, raw original transcription of ALL printed text on the card (in its original language and native script) in rawText so source-language information is preserved.
 7. Set confidence between 0 and 1 representing overall OCR and parsing certainty.`;
 
-// SecureStore fallback helpers
+import { Platform } from 'react-native';
+
+// SecureStore fallback & migration helpers with canonical options and sanitized logging
+export const CANONICAL_SECURE_STORE_OPTIONS: SecureStore.SecureStoreOptions = {
+  ...(Platform.OS === 'ios' ? { keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY } : {}),
+  requireAuthentication: false,
+};
+
+export type SecureStoreReadStatus =
+  | 'ready'
+  | 'key_missing'
+  | 'secure_store_read_error'
+  | 'wrong_alias'
+  | 'legacy_key_found';
+
+export type SecureStoreReadResult = {
+  key: string | null;
+  status: SecureStoreReadStatus;
+  errorName?: string;
+  errorMessage?: string;
+  migratedFrom?: string;
+};
+
+export async function getProviderKeyDetails(provider: AiProvider): Promise<SecureStoreReadResult> {
+  if (isWeb) {
+    return { key: null, status: 'key_missing' };
+  }
+
+  const canonicalKeyName = keyNames[provider];
+
+  // 1. Read canonical key with canonical options
+  try {
+    const value = await SecureStore.getItemAsync(canonicalKeyName, CANONICAL_SECURE_STORE_OPTIONS);
+    if (value && value.trim()) {
+      const clean = value.trim();
+      console.log('[CardNest SecureStore Diagnostic]', {
+        provider,
+        status: 'ready',
+        hasKey: true,
+        alias: canonicalKeyName,
+      });
+      return { key: clean, status: 'ready' };
+    }
+  } catch (err: any) {
+    const errorName = err?.name || err?.constructor?.name || 'SecureStoreReadError';
+    const errorMessage = err?.message || String(err);
+    console.warn('[CardNest SecureStore Diagnostic]', {
+      provider,
+      status: 'secure_store_read_error',
+      alias: canonicalKeyName,
+      errorName,
+      errorMessage,
+    });
+    return {
+      key: null,
+      status: 'secure_store_read_error',
+      errorName,
+      errorMessage,
+    };
+  }
+
+  // 2. Check legacy key names for migration
+  for (const legacyName of legacyKeyNames[provider] || []) {
+    try {
+      const legacyValue = await SecureStore.getItemAsync(legacyName, CANONICAL_SECURE_STORE_OPTIONS);
+      if (legacyValue && legacyValue.trim()) {
+        const clean = legacyValue.trim();
+        console.log('[CardNest SecureStore Diagnostic]', {
+          provider,
+          status: 'legacy_key_found',
+          migratedFrom: legacyName,
+          targetAlias: canonicalKeyName,
+          hasKey: true,
+        });
+
+        await SecureStore.setItemAsync(canonicalKeyName, clean, CANONICAL_SECURE_STORE_OPTIONS).catch(() => undefined);
+        await SecureStore.deleteItemAsync(legacyName, CANONICAL_SECURE_STORE_OPTIONS).catch(() => undefined);
+
+        return {
+          key: clean,
+          status: 'legacy_key_found',
+          migratedFrom: legacyName,
+        };
+      }
+    } catch (err: any) {
+      console.warn('[CardNest SecureStore Diagnostic]', {
+        provider,
+        status: 'secure_store_read_error',
+        legacyAlias: legacyName,
+        errorName: err?.name || 'SecureStoreReadError',
+        errorMessage: err?.message || String(err),
+      });
+    }
+  }
+
+  // 3. Key is truly missing (getItemAsync returned null without throwing)
+  console.log('[CardNest SecureStore Diagnostic]', {
+    provider,
+    status: 'key_missing',
+    alias: canonicalKeyName,
+  });
+
+  return { key: null, status: 'key_missing' };
+}
+
 export async function getProviderKey(provider: AiProvider): Promise<string | null> {
-  if (isWeb) return null;
-  return SecureStore.getItemAsync(keyNames[provider]);
+  const result = await getProviderKeyDetails(provider);
+  return result.key;
 }
 
 export async function setProviderKey(provider: AiProvider, apiKey: string) {
   if (!isWeb) {
-    await SecureStore.setItemAsync(keyNames[provider], apiKey.trim(), {
-      keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
-    });
+    const trimmed = apiKey.trim();
+    if (!trimmed) return;
+    await SecureStore.setItemAsync(keyNames[provider], trimmed, CANONICAL_SECURE_STORE_OPTIONS);
   }
 }
 
 export async function removeProviderKey(provider: AiProvider) {
-  if (!isWeb) await SecureStore.deleteItemAsync(keyNames[provider]);
+  if (!isWeb) {
+    await SecureStore.deleteItemAsync(keyNames[provider], CANONICAL_SECURE_STORE_OPTIONS).catch(() => undefined);
+    for (const legacyName of legacyKeyNames[provider] || []) {
+      await SecureStore.deleteItemAsync(legacyName, CANONICAL_SECURE_STORE_OPTIONS).catch(() => undefined);
+    }
+  }
+}
+
+export type ProviderCredentialState = {
+  hasServerCredential: boolean;
+  hasLocalCredential: boolean;
+  keySuffix: string | null;
+  state: 'ready' | 'needs_local_key' | 'not_configured' | 'secure_store_read_error';
+  errorDetails?: {
+    name?: string;
+    message?: string;
+  };
+};
+
+export async function getProviderCredentialState(provider: AiProvider): Promise<ProviderCredentialState> {
+  const [readResult, serverStatus] = await Promise.all([
+    getProviderKeyDetails(provider),
+    getServerCredentialStatus(),
+  ]);
+
+  const localKey = readResult.key;
+  const provServerStatus = serverStatus[provider];
+  const hasServer = Boolean(provServerStatus?.hasKey);
+  const suffix = localKey ? localKey.slice(-4) : provServerStatus?.keySuffix || null;
+
+  if (readResult.status === 'ready' || readResult.status === 'legacy_key_found') {
+    return {
+      hasServerCredential: hasServer,
+      hasLocalCredential: true,
+      keySuffix: suffix,
+      state: 'ready',
+    };
+  }
+
+  if (readResult.status === 'secure_store_read_error') {
+    return {
+      hasServerCredential: hasServer,
+      hasLocalCredential: false,
+      keySuffix: suffix,
+      state: 'secure_store_read_error',
+      errorDetails: {
+        name: readResult.errorName,
+        message: readResult.errorMessage,
+      },
+    };
+  }
+
+  if (hasServer) {
+    return {
+      hasServerCredential: true,
+      hasLocalCredential: false,
+      keySuffix: suffix,
+      state: 'needs_local_key',
+    };
+  }
+
+  return {
+    hasServerCredential: false,
+    hasLocalCredential: false,
+    keySuffix: null,
+    state: 'not_configured',
+  };
 }
 
 // Server Credential Storage (AES-256-GCM encrypted via Edge Function)

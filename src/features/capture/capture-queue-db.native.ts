@@ -50,7 +50,7 @@ function getDatabase(): SQLite.SQLiteDatabase {
         card_id TEXT NOT NULL,
         front_uri TEXT NOT NULL,
         back_uri TEXT,
-        state TEXT NOT NULL CHECK (state IN ('queued', 'uploading', 'processing', 'synced', 'failed')),
+        state TEXT NOT NULL CHECK (state IN ('queued', 'uploading', 'processing', 'synced', 'failed', 'not_a_card', 'needs_review', 'validating')),
         attempt_count INTEGER NOT NULL DEFAULT 0,
         last_error TEXT,
         next_retry_at TEXT,
@@ -112,6 +112,18 @@ export async function updateQueueItem(
   values?: { attemptCount?: number; lastError?: string | null; nextRetryAt?: string | null }
 ) {
   const db = getDatabase();
+  // Monotonic Terminal State Protection:
+  // If job is already 'synced' or 'not_a_card', do not allow stale failure/retry writes to overwrite terminal state.
+  if (['failed', 'uploading', 'processing', 'queued'].includes(state)) {
+    const existing = await db.getFirstAsync<QueueRow>('SELECT state FROM capture_queue WHERE id = ?', id);
+    if (existing && (existing.state === 'synced' || existing.state === 'not_a_card')) {
+      if (__DEV__) {
+        console.warn(`[CardNest Queue DB] Ignored stale ${state} write for item already in terminal state ${existing.state}`, { id });
+      }
+      return;
+    }
+  }
+
   await db.runAsync(
     'UPDATE capture_queue SET state = ?, attempt_count = COALESCE(?, attempt_count), last_error = ?, next_retry_at = ?, updated_at = ? WHERE id = ?',
     state,

@@ -65,6 +65,63 @@ type CaptureQueueContextValue = {
 
 const CaptureQueueContext = createContext<CaptureQueueContextValue | null>(null);
 
+export async function reconcileQueueItems(userId: string): Promise<CaptureQueueItem[]> {
+  const currentItems = await listQueueItems(userId);
+  if (currentItems.length === 0) return [];
+
+  const pendingOrFailed = currentItems.filter((item) =>
+    ['failed', 'processing', 'uploading', 'queued'].includes(item.state)
+  );
+
+  if (pendingOrFailed.length === 0) return currentItems;
+
+  const cardIds = Array.from(new Set(pendingOrFailed.map((i) => i.cardId)));
+
+  try {
+    const [{ data: existingCards }, { data: existingJobs }] = await Promise.all([
+      supabase.from('cards').select('id, status, display_name, primary_email, primary_phone').in('id', cardIds),
+      supabase.from('processing_jobs').select('card_id, status, last_error').eq('job_type', 'extraction').in('card_id', cardIds),
+    ]);
+
+    const cardsMap = new Map((existingCards || []).map((c) => [c.id, c]));
+    const jobsMap = new Map((existingJobs || []).map((j) => [j.card_id, j]));
+
+    for (const item of pendingOrFailed) {
+      const card = cardsMap.get(item.cardId);
+      const job = jobsMap.get(item.cardId);
+
+      if (
+        card &&
+        (card.status === 'ready' ||
+          card.status === 'synced' ||
+          card.primary_email ||
+          card.primary_phone ||
+          (card.display_name && card.display_name !== 'New business card'))
+      ) {
+        await updateQueueItem(item.id, 'synced', { lastError: null, nextRetryAt: null });
+        if (__DEV__) {
+          console.log(`[CardNest Queue Reconciliation] Repaired stale queue item ${item.id} to synced`, {
+            cardId: item.cardId,
+          });
+        }
+      } else if (job && job.status === 'synced') {
+        await updateQueueItem(item.id, 'synced', { lastError: null, nextRetryAt: null });
+      } else if (job && job.status === 'not_a_card') {
+        await updateQueueItem(item.id, 'not_a_card', {
+          lastError: job.last_error || 'This image does not appear to contain a contact card.',
+          nextRetryAt: null,
+        });
+      }
+    }
+  } catch (err) {
+    if (__DEV__) {
+      console.warn(`[CardNest Queue Reconciliation] Could not query remote records for queue repair`, err);
+    }
+  }
+
+  return await listQueueItems(userId);
+}
+
 export function CaptureQueueProvider({ children }: PropsWithChildren) {
   const { user } = useAuth();
   const network = useNetworkState();
@@ -78,7 +135,12 @@ export function CaptureQueueProvider({ children }: PropsWithChildren) {
   const processingRef = useRef(false);
 
   const refresh = useCallback(async () => {
-    setItems(user ? await listQueueItems(user.id) : []);
+    if (!user) {
+      setItems([]);
+      return;
+    }
+    const reconciled = await reconcileQueueItems(user.id).catch(() => listQueueItems(user.id));
+    setItems(reconciled);
   }, [user]);
 
   const processQueueItem = useCallback(
@@ -222,6 +284,30 @@ export function CaptureQueueProvider({ children }: PropsWithChildren) {
         });
         return false;
       } catch (catchedError) {
+        // Pre-check before writing failure state: if the final contact/card was already created in Supabase,
+        // final success wins over a late exception or network hiccup!
+        try {
+          const { data: existingCard } = await supabase
+            .from('cards')
+            .select('id, status, display_name, primary_email, primary_phone')
+            .eq('id', item.cardId)
+            .maybeSingle();
+
+          if (
+            existingCard &&
+            (existingCard.status === 'ready' ||
+              existingCard.status === 'synced' ||
+              existingCard.primary_email ||
+              existingCard.primary_phone ||
+              (existingCard.display_name && existingCard.display_name !== 'New business card'))
+          ) {
+            await updateQueueItem(item.id, 'synced', { attemptCount: attempt, lastError: null, nextRetryAt: null });
+            return true;
+          }
+        } catch {
+          // Fall through to normal failure state handling
+        }
+
         const delayMinutes = Math.min(2 ** Math.min(attempt, 6), 60);
         const errMessage =
           catchedError instanceof Error ? catchedError.message : 'Upload paused. Card Nest will retry when connected.';

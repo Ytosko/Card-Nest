@@ -52,6 +52,11 @@ export async function updateQueueItem(
 ) {
   const item = webQueue.get(id);
   if (!item) return;
+  if (['failed', 'uploading', 'processing', 'queued'].includes(state)) {
+    if (item.state === 'synced' || item.state === 'not_a_card') {
+      return;
+    }
+  }
   const updated: CaptureQueueItem = {
     ...item,
     state,

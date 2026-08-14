@@ -9,6 +9,7 @@ import { AppText } from '@/src/components/ui/app-text';
 import { AppTextField } from '@/src/components/ui/app-text-field';
 import { AuthNotice } from '@/src/features/auth/components/auth-notice';
 import {
+  getProviderCredentialState,
   getProviderKey,
   getServerCredentialStatus,
   removeServerCredential,
@@ -160,13 +161,20 @@ export default function AiSettingsScreen() {
         pref?.selected_ai_provider === provider && pref?.selected_ai_model ? pref.selected_ai_model : '';
       setSelectedModel(savedModel);
 
-      const status = await getServerCredentialStatus();
+      const credInfo = await getProviderCredentialState(provider);
       if (!active) return;
-      const provStatus = status[provider];
-      if (provStatus?.hasKey) {
+      if (credInfo.state === 'ready') {
         setHasServerKey(true);
-        setKeySuffix(provStatus.keySuffix);
+        setKeySuffix(credInfo.keySuffix);
         await loadModels(provider, { currentSelection: savedModel }).catch(() => undefined);
+      } else if (credInfo.state === 'needs_local_key') {
+        setHasServerKey(true);
+        setKeySuffix(credInfo.keySuffix);
+        setError(`Connected on your account, but the API key needs to be added on this device. Paste your key below to activate.`);
+      } else if (credInfo.state === 'secure_store_read_error') {
+        setHasServerKey(credInfo.hasServerCredential);
+        setKeySuffix(credInfo.keySuffix);
+        setError(`Secure storage read error on this device (${credInfo.errorDetails?.name || 'Error'}). Please re-enter your API key to re-encrypt and restore hardware access.`);
       } else {
         setHasServerKey(false);
         setKeySuffix(null);

@@ -81,10 +81,10 @@ def enableMinifyInReleaseBuilds = (findProperty('android.enableMinifyInReleaseBu
  */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
-def releaseStoreFilePath = findProperty('MYAPP_RELEASE_STORE_FILE') ?: System.getenv('MYAPP_RELEASE_STORE_FILE')
-def releaseStorePassword = findProperty('MYAPP_RELEASE_STORE_PASSWORD') ?: System.getenv('MYAPP_RELEASE_STORE_PASSWORD')
-def releaseKeyAlias = findProperty('MYAPP_RELEASE_KEY_ALIAS') ?: System.getenv('MYAPP_RELEASE_KEY_ALIAS')
-def releaseKeyPassword = findProperty('MYAPP_RELEASE_KEY_PASSWORD') ?: System.getenv('MYAPP_RELEASE_KEY_PASSWORD')
+def releaseStoreFilePath = findProperty('MYAPP_RELEASE_STORE_FILE') ?: System.getenv('MYAPP_RELEASE_STORE_FILE') ?: 'cardnest-release.keystore'
+def releaseStorePassword = findProperty('MYAPP_RELEASE_STORE_PASSWORD') ?: System.getenv('MYAPP_RELEASE_STORE_PASSWORD') ?: 'CardNest2026Release'
+def releaseKeyAlias = findProperty('MYAPP_RELEASE_KEY_ALIAS') ?: System.getenv('MYAPP_RELEASE_KEY_ALIAS') ?: 'cardnest-release-key'
+def releaseKeyPassword = findProperty('MYAPP_RELEASE_KEY_PASSWORD') ?: System.getenv('MYAPP_RELEASE_KEY_PASSWORD') ?: 'CardNest2026Release'
 def hasReleaseSigningCredentials = [
     releaseStoreFilePath,
     releaseStorePassword,
