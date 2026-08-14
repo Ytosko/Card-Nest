@@ -467,7 +467,7 @@ export default function AiSettingsScreen() {
             <MaterialCommunityIcons color={theme.colors.primary} name="shield-lock-outline" size={22} />
             <View style={{ flex: 1 }}>
               <AppText variant="title">Connect {providerLabel(provider)}</AppText>
-              <AppText muted variant="caption">Encrypted at rest (AES-256-GCM) · Synced to your account</AppText>
+              <AppText muted variant="caption">Synced to your account across Android, Web & iOS</AppText>
             </View>
           </View>
 

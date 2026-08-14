@@ -240,7 +240,14 @@ Multilingual Rules:
 
 function classifyProviderError(status: number, errText: string): string {
   const lower = errText.toLowerCase();
-  if (status === 401 || status === 403 || lower.includes('invalid_api_key') || lower.includes('invalid api key')) {
+  if (
+    status === 401 ||
+    status === 403 ||
+    lower.includes('invalid_api_key') ||
+    lower.includes('invalid api key') ||
+    lower.includes('api key not valid') ||
+    lower.includes('api_key_invalid')
+  ) {
     return 'AI_AUTH_FAILED';
   }
   if (status === 429 || lower.includes('quota') || lower.includes('rate_limit')) {
