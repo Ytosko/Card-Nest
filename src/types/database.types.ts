@@ -525,6 +525,7 @@ export type Database = {
           id: string
           iv: string
           key_suffix: string
+          last_validated_at: string | null
           provider: string
           updated_at: string
           user_id: string
@@ -536,6 +537,7 @@ export type Database = {
           id?: string
           iv: string
           key_suffix: string
+          last_validated_at?: string | null
           provider: string
           updated_at?: string
           user_id: string
@@ -547,6 +549,7 @@ export type Database = {
           id?: string
           iv?: string
           key_suffix?: string
+          last_validated_at?: string | null
           provider?: string
           updated_at?: string
           user_id?: string
@@ -586,6 +589,8 @@ export type Database = {
       user_preferences: {
         Row: {
           created_at: string
+          gemini_selected_model: string | null
+          openai_selected_model: string | null
           selected_ai_model: string | null
           selected_ai_provider: string | null
           updated_at: string
@@ -593,6 +598,8 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          gemini_selected_model?: string | null
+          openai_selected_model?: string | null
           selected_ai_model?: string | null
           selected_ai_provider?: string | null
           updated_at?: string
@@ -600,6 +607,8 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          gemini_selected_model?: string | null
+          openai_selected_model?: string | null
           selected_ai_model?: string | null
           selected_ai_provider?: string | null
           updated_at?: string

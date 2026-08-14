@@ -1,4 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
 
 import { supabase } from '@/src/lib/supabase/client';
 
@@ -193,8 +194,6 @@ Multilingual & Field extraction rules:
 6. Always store the complete, raw original transcription of ALL printed text on the card (in its original language and native script) in rawText so source-language information is preserved.
 7. Set confidence between 0 and 1 representing overall OCR and parsing certainty.`;
 
-import { Platform } from 'react-native';
-
 // SecureStore fallback & migration helpers with canonical options and sanitized logging
 export const CANONICAL_SECURE_STORE_OPTIONS: SecureStore.SecureStoreOptions = {
   ...(Platform.OS === 'ios' ? { keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY } : {}),
@@ -324,52 +323,116 @@ export type ProviderCredentialState = {
   hasServerCredential: boolean;
   hasLocalCredential: boolean;
   keySuffix: string | null;
-  state: 'ready' | 'needs_local_key' | 'not_configured' | 'secure_store_read_error';
+  state: 'ready' | 'needs_local_key' | 'not_configured' | 'secure_store_read_error' | 'network_error';
   errorDetails?: {
     name?: string;
     message?: string;
   };
 };
 
+export async function getServerCredentialStatus(): Promise<Record<string, { hasKey: boolean; connected: boolean; updatedAt?: string; lastValidatedAt?: string }>> {
+  try {
+    const { data, error } = await supabase.functions.invoke('ai-credentials', { method: 'GET' });
+    if (!error && data?.ok && data?.credentials) {
+      const result: Record<string, { hasKey: boolean; connected: boolean; updatedAt?: string; lastValidatedAt?: string }> = {};
+      for (const [p, meta] of Object.entries(data.credentials as Record<string, any>)) {
+        result[p] = {
+          hasKey: Boolean(meta.connected),
+          connected: Boolean(meta.connected),
+          updatedAt: meta.updatedAt,
+          lastValidatedAt: meta.lastValidatedAt,
+        };
+      }
+      return result;
+    }
+  } catch {
+    // Best-effort Edge Function fallback to direct metadata query
+  }
+
+  const { data: rows, error } = await supabase
+    .from('user_ai_credentials')
+    .select('provider, updated_at, last_validated_at');
+
+  const result: Record<string, { hasKey: boolean; connected: boolean; updatedAt?: string; lastValidatedAt?: string }> = {};
+
+  if (!error && rows) {
+    for (const row of rows) {
+      result[row.provider] = {
+        hasKey: true,
+        connected: true,
+        updatedAt: row.updated_at,
+        lastValidatedAt: row.last_validated_at || undefined,
+      };
+    }
+  }
+
+  return result;
+}
+
+export async function migrateLocalKeyToServer(provider: AiProvider): Promise<boolean> {
+  const localKey = await getProviderKey(provider);
+  if (!localKey) return false;
+
+  const serverStatus = await getServerCredentialStatus();
+  if (serverStatus[provider]?.connected) {
+    // Account credential already exists — safely delete stale local copy
+    await removeProviderKey(provider);
+    return true;
+  }
+
+  try {
+    const result = await saveServerCredential(provider, localKey);
+    if (result.connected) {
+      // Server migration confirmed — wipe local copy
+      await removeProviderKey(provider);
+      return true;
+    }
+  } catch {
+    // Migration failed — retain local key for future retry
+  }
+  return false;
+}
+
 export async function getProviderCredentialState(provider: AiProvider): Promise<ProviderCredentialState> {
-  const [readResult, serverStatus] = await Promise.all([
-    getProviderKeyDetails(provider),
-    getServerCredentialStatus(),
-  ]);
+  // 1. Check account-level server credentials first
+  let serverStatus: Record<string, { hasKey: boolean; connected: boolean }> = {};
+  let networkError = false;
+  try {
+    serverStatus = await getServerCredentialStatus();
+  } catch {
+    networkError = true;
+  }
 
-  const localKey = readResult.key;
   const provServerStatus = serverStatus[provider];
-  const hasServer = Boolean(provServerStatus?.hasKey);
-  const suffix = localKey ? localKey.slice(-4) : provServerStatus?.keySuffix || null;
-
-  if (readResult.status === 'ready' || readResult.status === 'legacy_key_found') {
+  if (provServerStatus?.connected) {
     return {
-      hasServerCredential: hasServer,
-      hasLocalCredential: true,
-      keySuffix: suffix,
+      hasServerCredential: true,
+      hasLocalCredential: false,
+      keySuffix: null,
       state: 'ready',
     };
   }
 
-  if (readResult.status === 'secure_store_read_error') {
-    return {
-      hasServerCredential: hasServer,
-      hasLocalCredential: false,
-      keySuffix: suffix,
-      state: 'secure_store_read_error',
-      errorDetails: {
-        name: readResult.errorName,
-        message: readResult.errorMessage,
-      },
-    };
+  // 2. Check for one-time local key migration if server credential is missing
+  const localKeyDetails = await getProviderKeyDetails(provider);
+  if (localKeyDetails.status === 'ready' || localKeyDetails.status === 'legacy_key_found') {
+    const migrated = await migrateLocalKeyToServer(provider);
+    if (migrated) {
+      return {
+        hasServerCredential: true,
+        hasLocalCredential: false,
+        keySuffix: null,
+        state: 'ready',
+      };
+    }
   }
 
-  if (hasServer) {
+  if (networkError) {
     return {
-      hasServerCredential: true,
+      hasServerCredential: false,
       hasLocalCredential: false,
-      keySuffix: suffix,
-      state: 'needs_local_key',
+      keySuffix: null,
+      state: 'network_error',
     };
   }
 
@@ -382,59 +445,33 @@ export async function getProviderCredentialState(provider: AiProvider): Promise<
 }
 
 // Server Credential Storage (AES-256-GCM encrypted via Edge Function)
-export async function saveServerCredential(provider: AiProvider, apiKey: string): Promise<{ keySuffix: string }> {
-  await setProviderKey(provider, apiKey);
+export async function saveServerCredential(provider: AiProvider, apiKey: string): Promise<{ connected: boolean }> {
+  const cleanKey = apiKey.trim();
+  if (!cleanKey) throw new Error('API key is required.');
 
   const { data, error } = await supabase.functions.invoke('ai-credentials', {
-    body: { provider, apiKey: apiKey.trim() },
+    body: { provider, apiKey: cleanKey },
   });
 
-  if (error) {
-    const suffix = apiKey.trim().slice(-4);
-    return { keySuffix: suffix };
-  }
-
+  if (error) throw new Error(error.message || 'Could not communicate with AI credentials service.');
   if (data?.error) throw new Error(data.error);
-  return { keySuffix: data?.keySuffix ?? apiKey.trim().slice(-4) };
-}
 
-export async function getServerCredentialStatus(): Promise<Record<string, { hasKey: boolean; keySuffix: string }>> {
-  const { data: rows, error } = await supabase
-    .from('user_ai_credentials')
-    .select('provider, key_suffix');
+  // Best-effort cleanup of legacy local SecureStore key after successful server save
+  await removeProviderKey(provider).catch(() => undefined);
 
-  const result: Record<string, { hasKey: boolean; keySuffix: string }> = {};
-
-  if (!error && rows) {
-    for (const row of rows) {
-      result[row.provider] = {
-        hasKey: true,
-        keySuffix: row.key_suffix,
-      };
-    }
-  }
-
-  for (const prov of ['openai', 'gemini'] as AiProvider[]) {
-    if (!result[prov]) {
-      const localKey = await getProviderKey(prov);
-      if (localKey) {
-        result[prov] = { hasKey: true, keySuffix: localKey.slice(-4) };
-      }
-    }
-  }
-
-  return result;
+  return { connected: true };
 }
 
 export async function removeServerCredential(provider: AiProvider) {
   await removeProviderKey(provider);
 
-  const { data: userResp } = await supabase.auth.getUser();
-  if (userResp?.user) {
-    await supabase.from('user_ai_credentials').delete().eq('user_id', userResp.user.id).eq('provider', provider);
+  const { error } = await supabase.functions.invoke(`ai-credentials?provider=${provider}`, { method: 'DELETE' });
+  if (error) {
+    const { data: userResp } = await supabase.auth.getUser();
+    if (userResp?.user) {
+      await supabase.from('user_ai_credentials').delete().eq('user_id', userResp.user.id).eq('provider', provider);
+    }
   }
-
-  void supabase.functions.invoke(`ai-credentials?provider=${provider}`, { method: 'DELETE' });
 }
 
 // Model discovery lives in model-catalog.ts: dynamic, capability-driven, cached,
@@ -542,7 +579,7 @@ export async function extractBusinessCard(
         });
       }
 
-      // Stage 2: Validate extraction output without falling back to provider call
+      // Stage 2: Validate extraction output
       return validateExtractionResponse(backendData.result, provider, model);
     }
 
@@ -563,118 +600,10 @@ export async function extractBusinessCard(
     }
   }
 
-  // Direct fallback should ONLY execute if backend transport was genuinely unreachable
-  if (__DEV__) {
-    console.warn(`[CardNest AI Pipeline] Backend invocation unreachable (transport error), trying direct fallback...`, {
-      transportError: backendErr?.message ?? 'Network unreachable',
-    });
-  }
-
-  const keyToUse = apiKey || (await getProviderKey(provider));
-  if (!keyToUse) {
-    throw new AiExtractionError(
-      'AI_CREDENTIAL_MISSING',
-      `No API key configured for ${provider}. Please enter your key in Settings > AI.`,
-      { provider, model, stage: 'directFallbackKey' }
-    );
-  }
-
-  const rawResult =
-    provider === 'openai'
-      ? await extractWithOpenAIDirect(model, keyToUse, images)
-      : await extractWithGeminiDirect(model, keyToUse, images);
-
-  return validateExtractionResponse(rawResult, provider, model);
-}
-
-async function extractWithOpenAIDirect(model: string, apiKey: string, images: string[]) {
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: extractionPrompt },
-            ...images.map((data) => ({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${data}` } })),
-          ],
-        },
-      ],
-      response_format: {
-        type: 'json_schema',
-        json_schema: { name: 'business_card', strict: true, schema: jsonSchema },
-      },
-    }),
-  });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    const code = classifyProviderHttpError(response.status, errText);
-    throw new AiExtractionError(code, `OpenAI API returned ${response.status}: ${errText.slice(0, 100)}`, {
-      httpStatus: response.status,
-      provider: 'openai',
-      model,
-      stage: 'directOpenAI',
-    });
-  }
-
-  const body = await response.json();
-  const text = body.choices?.[0]?.message?.content;
-  if (!text) {
-    throw new AiExtractionError('AI_RESPONSE_INVALID', 'OpenAI returned empty contact text.', { provider: 'openai', model, stage: 'directOpenAI' });
-  }
-
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new AiExtractionError('AI_RESPONSE_INVALID', 'OpenAI output failed JSON parsing.', { provider: 'openai', model, stage: 'directOpenAI' });
-  }
-}
-
-async function extractWithGeminiDirect(model: string, apiKey: string, images: string[]) {
-  const modelName = model.startsWith('models/') ? model.slice(7) : model;
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelName)}:generateContent?key=${encodeURIComponent(apiKey)}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              { text: extractionPrompt },
-              ...images.map((data) => ({ inline_data: { mime_type: 'image/jpeg', data } })),
-            ],
-          },
-        ],
-        generationConfig: { responseMimeType: 'application/json', responseSchema: jsonSchema },
-      }),
-    }
+  // If backend reached but failed, or transport error
+  throw new AiExtractionError(
+    'AI_NETWORK_ERROR',
+    'Network connection is offline or AI backend is unreachable. Extraction will resume when online.',
+    { provider, model, stage: 'backendExtraction' }
   );
-
-  if (!response.ok) {
-    const errText = await response.text();
-    const code = classifyProviderHttpError(response.status, errText);
-    throw new AiExtractionError(code, `Gemini API returned ${response.status}: ${errText.slice(0, 100)}`, {
-      httpStatus: response.status,
-      provider: 'gemini',
-      model,
-      stage: 'directGemini',
-    });
-  }
-
-  const body = await response.json();
-  const text = body.candidates?.[0]?.content?.parts?.find((part: { text?: string }) => part.text)?.text;
-  if (!text) {
-    throw new AiExtractionError('AI_RESPONSE_INVALID', 'Gemini returned empty contact text.', { provider: 'gemini', model, stage: 'directGemini' });
-  }
-
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new AiExtractionError('AI_RESPONSE_INVALID', 'Gemini output failed JSON parsing.', { provider: 'gemini', model, stage: 'directGemini' });
-  }
 }

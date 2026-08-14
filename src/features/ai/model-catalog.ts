@@ -1,5 +1,7 @@
 import { Directory, File, Paths } from 'expo-file-system';
 
+import { supabase } from '@/src/lib/supabase/client';
+
 import type { AiProvider } from './ai-provider';
 
 /**
@@ -310,7 +312,7 @@ export function getCachedCatalog(provider: AiProvider, { allowStale = false } = 
  */
 export async function getModelCatalog(
   provider: AiProvider,
-  apiKey: string,
+  apiKey?: string | null,
   { forceRefresh = false } = {}
 ): Promise<ModelCatalog> {
   if (!forceRefresh) {
@@ -318,11 +320,29 @@ export async function getModelCatalog(
     if (cached) return cached;
   }
 
-  let models: AiModelInfo[];
+  let models: AiModelInfo[] = [];
   try {
-    models = provider === 'gemini' ? await fetchGeminiModels(apiKey) : await fetchOpenAiModels(apiKey);
+    if (apiKey) {
+      models = provider === 'gemini' ? await fetchGeminiModels(apiKey) : await fetchOpenAiModels(apiKey);
+    } else {
+      const { data, error } = await supabase.functions.invoke(`ai-credentials?action=models&provider=${provider}`, { method: 'GET' });
+      if (error || !data?.ok || !Array.isArray(data?.models)) {
+        const cached = getCachedCatalog(provider, { allowStale: true });
+        if (cached) return cached;
+        throw new ModelCatalogError('provider-error', data?.error || 'Could not fetch model list from server.');
+      }
+
+      models = (data.models as string[]).map((id) => {
+        if (provider === 'gemini') {
+          return geminiModelInfo({ name: id, displayName: id, supportedGenerationMethods: ['generateContent'] });
+        }
+        return openAiModelInfo({ id });
+      });
+    }
   } catch (error) {
     if (error instanceof ModelCatalogError) throw error;
+    const cached = getCachedCatalog(provider, { allowStale: true });
+    if (cached) return cached;
     throw new ModelCatalogError('network-error', 'Could not reach the provider. Check your connection and try again.');
   }
 

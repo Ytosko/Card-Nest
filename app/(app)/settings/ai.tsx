@@ -22,7 +22,6 @@ import {
   ModelCatalogError,
   pickDefaultModel,
   recordModelValidation,
-  testProviderConnection,
   validateModel,
   type AiModelInfo,
 } from '@/src/features/ai/model-catalog';
@@ -75,27 +74,25 @@ export default function AiSettingsScreen() {
   const persistSelection = useCallback(
     async (prov: AiProvider, modelId: string) => {
       if (!user) return;
-      const { error: saveError } = await supabase.from('user_preferences').upsert({
+      const updatePayload: Record<string, any> = {
         user_id: user.id,
         selected_ai_provider: prov,
         selected_ai_model: modelId,
-      });
+        updated_at: new Date().toISOString(),
+      };
+      if (prov === 'gemini') updatePayload.gemini_selected_model = modelId;
+      if (prov === 'openai') updatePayload.openai_selected_model = modelId;
+
+      const { error: saveError } = await supabase.from('user_preferences').upsert(updatePayload);
       if (saveError) throw saveError;
     },
     [user]
   );
 
-  /** Loads models; a default is auto-picked only when no model was ever chosen. */
+  /** Loads models from server via Edge Function; an account-level selection is saved. */
   const loadModels = useCallback(
-    async (prov: AiProvider, opts: { apiKey?: string; forceRefresh?: boolean; currentSelection?: string }) => {
-      const key = opts.apiKey || (await getProviderKey(prov));
-      if (!key) {
-        const cached = getCachedCatalog(prov, { allowStale: true });
-        setModels(cached?.models ?? []);
-        return cached?.models ?? [];
-      }
-
-      const catalog = await getModelCatalog(prov, key, { forceRefresh: opts.forceRefresh ?? false });
+    async (prov: AiProvider, opts: { forceRefresh?: boolean; currentSelection?: string } = {}) => {
+      const catalog = await getModelCatalog(prov, null, { forceRefresh: opts.forceRefresh ?? false });
       setModels(catalog.models);
 
       const current = opts.currentSelection ?? selectedModel;
@@ -112,7 +109,7 @@ export default function AiSettingsScreen() {
   );
 
   // Opening the screen: resolve the active/connected provider automatically so a
-  // configured account shows its connected state immediately — never the setup form.
+  // configured account shows its connected state immediately.
   useEffect(() => {
     if (!user) return;
     let active = true;
@@ -128,9 +125,9 @@ export default function AiSettingsScreen() {
         pref?.selected_ai_provider === 'openai' || pref?.selected_ai_provider === 'gemini' ? pref.selected_ai_provider : null;
 
       let initial: AiProvider = 'openai';
-      if (preferred && status[preferred]?.hasKey) initial = preferred;
-      else if (status.gemini?.hasKey && !status.openai?.hasKey) initial = 'gemini';
-      else if (status.openai?.hasKey) initial = 'openai';
+      if (preferred && status[preferred]?.connected) initial = preferred;
+      else if (status.gemini?.connected && !status.openai?.connected) initial = 'gemini';
+      else if (status.openai?.connected) initial = 'openai';
       else if (preferred) initial = preferred;
 
       autoSelected.current = true;
@@ -158,23 +155,20 @@ export default function AiSettingsScreen() {
       const { data: pref } = await supabase.from('user_preferences').select('*').eq('user_id', user.id).maybeSingle();
       if (!active) return;
       const savedModel =
-        pref?.selected_ai_provider === provider && pref?.selected_ai_model ? pref.selected_ai_model : '';
+        pref?.selected_ai_provider === provider
+          ? pref?.selected_ai_model || (provider === 'gemini' ? pref?.gemini_selected_model : pref?.openai_selected_model) || ''
+          : '';
       setSelectedModel(savedModel);
 
       const credInfo = await getProviderCredentialState(provider);
       if (!active) return;
       if (credInfo.state === 'ready') {
         setHasServerKey(true);
-        setKeySuffix(credInfo.keySuffix);
+        setKeySuffix(null);
         await loadModels(provider, { currentSelection: savedModel }).catch(() => undefined);
-      } else if (credInfo.state === 'needs_local_key') {
-        setHasServerKey(true);
-        setKeySuffix(credInfo.keySuffix);
-        setError(`Connected on your account, but the API key needs to be added on this device. Paste your key below to activate.`);
-      } else if (credInfo.state === 'secure_store_read_error') {
-        setHasServerKey(credInfo.hasServerCredential);
-        setKeySuffix(credInfo.keySuffix);
-        setError(`Secure storage read error on this device (${credInfo.errorDetails?.name || 'Error'}). Please re-enter your API key to re-encrypt and restore hardware access.`);
+      } else if (credInfo.state === 'network_error') {
+        setHasServerKey(false);
+        setError('Unable to check AI connection right now. Please check your network.');
       } else {
         setHasServerKey(false);
         setKeySuffix(null);
@@ -192,11 +186,10 @@ export default function AiSettingsScreen() {
       const newKey = rawKey.trim();
       if (!newKey) throw new Error(`Paste your ${providerLabel(provider)} API key first.`);
 
-      const { keySuffix: savedSuffix } = await saveServerCredential(provider, newKey);
+      await saveServerCredential(provider, newKey);
       setHasServerKey(true);
-      setKeySuffix(savedSuffix);
 
-      const available = await loadModels(provider, { apiKey: newKey, forceRefresh: true, currentSelection: selectedModel });
+      const available = await loadModels(provider, { forceRefresh: true, currentSelection: selectedModel });
       if (selectedModel && !available.some((m) => m.id === selectedModel)) {
         setPickerOpen(true);
         setError(`Connected, but your previous model (${selectedModel}) is not available with this key. Choose a model below.`);
@@ -242,21 +235,8 @@ export default function AiSettingsScreen() {
     setError(null);
     setNotice(null);
     try {
-      const key = await getProviderKey(provider);
-      if (!key) {
-        throw new Error('Testing from this device needs the key here. Use Change API key to paste it once.');
-      }
-      const result = await testProviderConnection(provider, key, selectedModel || null);
-      if (result.status === 'connected') {
-        setNotice(result.message);
-        await loadModels(provider, { apiKey: key, currentSelection: selectedModel }).catch(() => undefined);
-      } else {
-        setError(result.message);
-        if (result.status === 'model-unavailable') {
-          setPickerOpen(true);
-          await loadModels(provider, { apiKey: key, forceRefresh: true, currentSelection: selectedModel }).catch(() => undefined);
-        }
-      }
+      const catalog = await loadModels(provider, { forceRefresh: true, currentSelection: selectedModel });
+      setNotice(`Connection verified with ${providerLabel(provider)}. ${catalog.length} models available.`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Connection test failed.');
     } finally {
@@ -270,9 +250,7 @@ export default function AiSettingsScreen() {
     setNotice(null);
     try {
       const available = await loadModels(provider, { forceRefresh: true, currentSelection: selectedModel });
-      if (available.length === 0) {
-        setError('Refreshing models from this device needs the key here. Use Change API key to paste it once.');
-      } else if (selectedModel && !available.some((m) => m.id === selectedModel)) {
+      if (selectedModel && !available.some((m) => m.id === selectedModel)) {
         setPickerOpen(true);
         setError(`Your selected model (${selectedModel}) is no longer available. Choose another model below.`);
       } else {

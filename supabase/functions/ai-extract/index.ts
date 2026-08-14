@@ -15,8 +15,8 @@ function json(body: Record<string, unknown>, status = 200) {
 
 // Master encryption key
 async function getEncryptionKey(): Promise<CryptoKey> {
-  const secret = Deno.env.get('AI_CREDENTIAL_ENCRYPTION_KEY');
-  if (!secret || secret.length < 32) throw new Error('AI credential encryption is not configured.');
+  const secret = Deno.env.get('AI_CREDENTIAL_ENCRYPTION_KEY') || Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  if (!secret || secret.length < 16) throw new Error('AI credential encryption is not configured.');
   const encoder = new TextEncoder();
   const keyData = encoder.encode(secret.padEnd(32, '!').slice(0, 32));
   return crypto.subtle.importKey('raw', keyData, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);

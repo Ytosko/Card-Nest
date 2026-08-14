@@ -13,28 +13,28 @@ function json(body: Record<string, unknown>, status = 200) {
   });
 }
 
-// Master encryption key derived from environment secret
+// Encryption key derived from server-only secret
 async function getEncryptionKey(): Promise<CryptoKey> {
-  const secret = Deno.env.get('AI_CREDENTIAL_ENCRYPTION_KEY');
-  if (!secret || secret.length < 32) throw new Error('AI credential encryption is not configured.');
+  const secret = Deno.env.get('AI_CREDENTIAL_ENCRYPTION_KEY') || Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  if (!secret || secret.length < 16) throw new Error('AI credential encryption is not configured on server.');
   const encoder = new TextEncoder();
   const keyData = encoder.encode(secret.padEnd(32, '!').slice(0, 32));
   return crypto.subtle.importKey('raw', keyData, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
 }
 
-async function decryptApiKey(ciphertextB64: string, ivB64: string, authTagB64: string): Promise<string> {
+export async function decryptApiKey(ciphertextB64: string, ivB64: string, authTagB64: string): Promise<string> {
   const key = await getEncryptionKey();
   const ciphertext = Uint8Array.from(atob(ciphertextB64), (char) => char.charCodeAt(0));
   const iv = Uint8Array.from(atob(ivB64), (char) => char.charCodeAt(0));
   const authTag = Uint8Array.from(atob(authTagB64), (char) => char.charCodeAt(0));
   const combined = new Uint8Array(ciphertext.length + authTag.length);
-  combined.set(ciphertext); combined.set(authTag, ciphertext.length);
+  combined.set(ciphertext);
+  combined.set(authTag, ciphertext.length);
   const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, combined);
   return new TextDecoder().decode(decrypted);
 }
 
-// AES-256-GCM Encryption
-async function encryptApiKey(plaintext: string): Promise<{ ciphertext: string; iv: string; authTag: string; keySuffix: string }> {
+async function encryptApiKey(plaintext: string): Promise<{ ciphertext: string; iv: string; authTag: string }> {
   const key = await getEncryptionKey();
   const ivBytes = crypto.getRandomValues(new Uint8Array(12));
   const encoder = new TextEncoder();
@@ -50,10 +50,8 @@ async function encryptApiKey(plaintext: string): Promise<{ ciphertext: string; i
   const ciphertext = btoa(String.fromCharCode(...ciphertextBytes));
   const iv = btoa(String.fromCharCode(...ivBytes));
   const authTag = btoa(String.fromCharCode(...tagBytes));
-  const cleanKey = plaintext.trim();
-  const keySuffix = cleanKey.length >= 4 ? cleanKey.slice(-4) : cleanKey;
 
-  return { ciphertext, iv, authTag, keySuffix };
+  return { ciphertext, iv, authTag };
 }
 
 Deno.serve(async (request) => {
@@ -87,7 +85,7 @@ Deno.serve(async (request) => {
   const url = new URL(request.url);
   const action = url.searchParams.get('action');
 
-  // GET: Fetch credential metadata status
+  // GET: Fetch safe credential status or dynamic model list (ZERO key material returned)
   if (request.method === 'GET') {
     if (action === 'models') {
       const provider = url.searchParams.get('provider');
@@ -98,7 +96,9 @@ Deno.serve(async (request) => {
         .eq('user_id', userId)
         .eq('provider', provider)
         .maybeSingle();
+
       if (credentialError || !credential) return json({ error: `Configure a ${provider} key before loading models.` }, 400);
+
       let decryptedKey: string | null = null;
       try {
         decryptedKey = await decryptApiKey(credential.encrypted_key, credential.iv, credential.auth_tag);
@@ -119,24 +119,26 @@ Deno.serve(async (request) => {
           .sort();
         return json({ ok: true, models });
       } catch {
-        return json({ error: 'Encrypted provider credential could not be used. Save the key again.' }, 400);
+        return json({ error: 'Encrypted provider credential could not be decrypted. Save the key again.' }, 400);
       } finally {
         decryptedKey = null;
       }
     }
+
+    // Fetch safe metadata status only (no raw key material)
     const { data: rows, error: fetchError } = await adminClient
       .from('user_ai_credentials')
-      .select('provider, key_suffix, updated_at')
+      .select('provider, updated_at, last_validated_at')
       .eq('user_id', userId);
 
-    if (fetchError) return json({ error: 'Could not fetch credentials.' }, 500);
+    if (fetchError) return json({ error: 'Could not fetch credential metadata.' }, 500);
 
-    const credentials: Record<string, { hasKey: boolean; keySuffix: string; updatedAt: string }> = {};
+    const credentials: Record<string, { connected: boolean; updatedAt: string; lastValidatedAt?: string }> = {};
     for (const row of rows || []) {
       credentials[row.provider] = {
-        hasKey: true,
-        keySuffix: row.key_suffix,
+        connected: true,
         updatedAt: row.updated_at,
+        lastValidatedAt: row.last_validated_at,
       };
     }
 
@@ -158,10 +160,10 @@ Deno.serve(async (request) => {
 
     if (deleteError) return json({ error: 'Could not remove credential.' }, 500);
 
-    return json({ ok: true, message: 'Credential removed permanently.' });
+    return json({ ok: true, provider, connected: false, message: 'Credential removed permanently.' });
   }
 
-  // POST: Save or test key
+  // POST: Save, test, or replace key
   if (request.method === 'POST') {
     try {
       const body = await request.json();
@@ -193,7 +195,8 @@ Deno.serve(async (request) => {
         }
       }
 
-      const { ciphertext, iv, authTag, keySuffix } = await encryptApiKey(cleanKey);
+      const { ciphertext, iv, authTag } = await encryptApiKey(cleanKey);
+      const now = new Date().toISOString();
 
       const { error: upsertError } = await adminClient
         .from('user_ai_credentials')
@@ -204,8 +207,8 @@ Deno.serve(async (request) => {
             encrypted_key: ciphertext,
             iv,
             auth_tag: authTag,
-            key_suffix: keySuffix,
-            updated_at: new Date().toISOString(),
+            updated_at: now,
+            last_validated_at: now,
           },
           { onConflict: 'user_id,provider' }
         );
@@ -215,7 +218,7 @@ Deno.serve(async (request) => {
       return json({
         ok: true,
         provider,
-        keySuffix,
+        connected: true,
         message: 'Credential encrypted and saved successfully.',
       });
     } catch (err) {
