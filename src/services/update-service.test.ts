@@ -15,14 +15,14 @@ vi.mock('expo-constants', () => ({
     nativeAppVersion: null,
     nativeBuildVersion: null,
     expoConfig: {
-      version: '1.0.2-beta-f0D2X',
-      android: { package: 'dev.ytosko.cardnest', versionCode: 11 },
+      version: '2.0.0-MXJ7',
+      android: { package: 'dev.ytosko.cardnest', versionCode: 24 },
     },
   },
 }));
 
 vi.mock('expo-updates', () => ({
-  runtimeVersion: '1.0.2-beta-f0D2X',
+  runtimeVersion: '2.0.0-MXJ7',
   channel: 'beta',
   updateId: 'test-ota-id',
   isEmbeddedLaunch: true,
@@ -200,7 +200,15 @@ beforeEach(() => {
 
 describe('native update release selection', () => {
   it('reads the embedded native version and build', () => {
-    expect(getCurrentVersionInfo()).toMatchObject({ versionName: '1.0.2-beta-f0D2X', versionCode: 11 });
+    expect(getCurrentVersionInfo()).toMatchObject({ versionName: '2.0.0-MXJ7', versionCode: 24 });
+  });
+
+  it('prevents self-update loops when installed build matches latest release', () => {
+    const current = { versionName: '2.0.0-MXJ7', versionCode: 24 };
+    expect(isNewerVersion(current, 'v2.0.0-MXJ7', 'Card Nest 2.0.0-MXJ7 release. versionCode: 24', 24)).toBe(false);
+    expect(isNewerVersion(current, 'v2.0.0-MXJ7', 'Card Nest 2.0.0-MXJ7 release', 24)).toBe(false);
+    expect(isNewerVersion(current, 'v2.0.0-MXJ7', '')).toBe(false);
+    expect(isNewerVersion(current, 'v2.0.0-MXJ7', 'versionCode: 25', 25)).toBe(true);
   });
 
   it('parses semantic versions and release channels', () => {
@@ -311,30 +319,30 @@ describe('native update release selection', () => {
       ok: true,
       status: 200,
       json: async () => ({
-        versionName: '1.0.2-X0811',
-        versionCode: 16,
+        versionName: '2.0.1',
+        versionCode: 25,
         platform: 'android',
-        apkAsset: 'Card-Nest-1.0.2-X0811-android.apk',
+        apkAsset: 'Card-Nest-2.0.1-android.apk',
       }),
     });
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: true,
       status: 200,
       json: async () => [{
-        tag_name: 'v1.0.2-X0811',
-        body: 'Release 1.0.2-X0811',
+        tag_name: 'v2.0.1',
+        body: 'Release 2.0.1. versionCode: 25',
         published_at: release.publishedAt,
         draft: false,
         assets: [
-          { name: 'Card-Nest-1.0.2-X0811-android.apk', browser_download_url: 'https://github.com/Ytosko/Card-Nest/releases/download/v1.0.2-X0811/Card-Nest-1.0.2-X0811-android.apk', size: assetSize },
-          { name: 'cardnest-release.json', browser_download_url: 'https://github.com/Ytosko/Card-Nest/releases/download/v1.0.2-X0811/cardnest-release.json', size: 120 },
+          { name: 'Card-Nest-2.0.1-android.apk', browser_download_url: 'https://github.com/Ytosko/Card-Nest/releases/download/v2.0.1/Card-Nest-2.0.1-android.apk', size: assetSize },
+          { name: 'cardnest-release.json', browser_download_url: 'https://github.com/Ytosko/Card-Nest/releases/download/v2.0.1/cardnest-release.json', size: 120 },
         ],
       }],
     })));
     const result = await checkForAppUpdate(true);
     expect(result.isNativeUpdateAvailable).toBe(true);
-    expect(result.latestVersion?.versionName).toBe('1.0.2-X0811');
-    expect(result.latestVersion?.versionCode).toBe(16);
+    expect(result.latestVersion?.versionName).toBe('2.0.1');
+    expect(result.latestVersion?.versionCode).toBe(25);
   });
 });
 

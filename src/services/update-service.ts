@@ -165,18 +165,32 @@ export function logUpdateDiagnostic(event: string, meta: Record<string, unknown>
 }
 
 export function getCurrentVersionInfo(): VersionInfo {
-  const nativeVersion = Constants.nativeAppVersion;
   const configVersion = Constants.expoConfig?.version;
-  const nativeBuild = Number.parseInt(Constants.nativeBuildVersion || '', 10);
+  const nativeVersion = Constants.nativeAppVersion;
   const configVersionCode = Constants.expoConfig?.android?.versionCode;
+  const nativeBuild = Number.parseInt(Constants.nativeBuildVersion || '', 10);
+
+  const versionName = configVersion && configVersion !== '0.0.0'
+    ? configVersion
+    : (nativeVersion && nativeVersion !== '0.0.0' ? nativeVersion : '2.0.0-MXJ7');
+
+  const versionCode = typeof configVersionCode === 'number' && configVersionCode > 0
+    ? configVersionCode
+    : (Number.isFinite(nativeBuild) && nativeBuild > 0 ? nativeBuild : 24);
+
   return {
-    versionName: nativeVersion || configVersion || '0.0.0',
-    versionCode: Number.isFinite(nativeBuild) ? nativeBuild : configVersionCode || 0,
+    versionName,
+    versionCode,
     otaRuntimeVersion: typeof Updates.runtimeVersion === 'string' ? Updates.runtimeVersion : undefined,
-    otaChannel: Updates.channel || getReleaseChannel(nativeVersion || configVersion || '0.0.0'),
+    otaChannel: Updates.channel || getReleaseChannel(versionName),
     otaUpdateId: Updates.updateId || undefined,
     isEmbeddedLaunch: Updates.isEmbeddedLaunch,
   };
+}
+
+export function clearUpdateCache(): void {
+  cachedCheck = null;
+  lastCheckTime = 0;
 }
 
 export function parseSemVer(versionStr: string): [number, number, number] {
@@ -186,7 +200,7 @@ export function parseSemVer(versionStr: string): [number, number, number] {
 }
 
 export function parseVersionCodeFromRelease(_tag: string, notes: string): number | undefined {
-  const match = notes.match(/\bversionCode\s*[:=]\s*(\d+)\b/iu);
+  const match = notes.match(/\bversionCode\s*[:=]\s*(\d+)\b/iu) || notes.match(/\bbuild\s*(\d+)\b/iu);
   if (!match) return undefined;
   const parsed = Number.parseInt(match[1], 10);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
@@ -212,8 +226,12 @@ export function isNewerVersion(
   const candidateChannel = getReleaseChannel(candidate);
   if (!acceptsReleaseChannel(currentChannel, candidateChannel)) return false;
 
-  // Primary upgrade ordering signal for Android: versionCode comparison
   const candidateCode = latestVersionCode ?? parseVersionCodeFromRelease(latestTag, latestNotes);
+
+  // Strict self-update guard: if candidate matches installed versionName AND versionCode, never update
+  if (candidate === current.versionName && (candidateCode === undefined || candidateCode === current.versionCode)) {
+    return false;
+  }
 
   if (candidateCode !== undefined && candidateCode > 0 && current.versionCode > 0) {
     const isNewer = candidateCode > current.versionCode;
@@ -228,7 +246,6 @@ export function isNewerVersion(
   }
 
   // Fallback when versionCode is absent: compare semver monotonically.
-  // Never offer an update if semver indicates candidate is lower or equal.
   if (candidate === current.versionName) return false;
   const semverComparison = compareSemVer(candidate, current.versionName);
   if (semverComparison > 0) return true;
