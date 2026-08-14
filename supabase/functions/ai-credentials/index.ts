@@ -13,84 +13,6 @@ function json(body: Record<string, unknown>, status = 200) {
   });
 }
 
-// Dedicated encryption key derived from AI_CREDENTIAL_ENCRYPTION_KEY via SHA-256
-async function getEncryptionKey(version = 1): Promise<CryptoKey> {
-  let secret: string | undefined;
-  if (version === 1) {
-    secret = Deno.env.get('AI_CREDENTIAL_ENCRYPTION_KEY');
-  } else if (version === 2) {
-    secret = Deno.env.get('AI_CREDENTIAL_ENCRYPTION_KEY_V2') || Deno.env.get('AI_CREDENTIAL_ENCRYPTION_KEY');
-  }
-
-  if (!secret || secret.trim().length < 16) {
-    throw new Error('AI_ENCRYPTION_KEY_NOT_CONFIGURED');
-  }
-
-  const encoder = new TextEncoder();
-  const keyData = await crypto.subtle.digest('SHA-256', encoder.encode(secret));
-  return crypto.subtle.importKey('raw', keyData, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
-}
-
-export async function decryptApiKey(
-  ciphertextB64: string,
-  ivB64: string,
-  authTagB64: string,
-  version = 1
-): Promise<string> {
-  let key: CryptoKey;
-  try {
-    key = await getEncryptionKey(version);
-  } catch (keyErr) {
-    if (version === 0) {
-      const legacySecret = Deno.env.get('AI_CREDENTIAL_ENCRYPTION_KEY');
-      if (!legacySecret) throw keyErr;
-      const encoder = new TextEncoder();
-      const keyData = encoder.encode(legacySecret.padEnd(32, '!').slice(0, 32));
-      key = await crypto.subtle.importKey('raw', keyData, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
-    } else {
-      throw keyErr;
-    }
-  }
-
-  const ciphertext = Uint8Array.from(atob(ciphertextB64), (char) => char.charCodeAt(0));
-  const iv = Uint8Array.from(atob(ivB64), (char) => char.charCodeAt(0));
-  const authTag = Uint8Array.from(atob(authTagB64), (char) => char.charCodeAt(0));
-
-  const combined = new Uint8Array(ciphertext.length + authTag.length);
-  combined.set(ciphertext);
-  combined.set(authTag, ciphertext.length);
-
-  try {
-    const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, combined);
-    return new TextDecoder().decode(decrypted);
-  } catch {
-    throw new Error('AI_DECRYPTION_FAILED');
-  }
-}
-
-async function encryptApiKey(
-  plaintext: string,
-  version = 1
-): Promise<{ ciphertext: string; iv: string; authTag: string; encryptionVersion: number }> {
-  const key = await getEncryptionKey(version);
-  const ivBytes = crypto.getRandomValues(new Uint8Array(12));
-  const encoder = new TextEncoder();
-  const encodedText = encoder.encode(plaintext);
-
-  const encryptedBuffer = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: ivBytes }, key, encodedText);
-  const encryptedArray = new Uint8Array(encryptedBuffer);
-
-  const tagLength = 16;
-  const ciphertextBytes = encryptedArray.slice(0, encryptedArray.length - tagLength);
-  const tagBytes = encryptedArray.slice(encryptedArray.length - tagLength);
-
-  const ciphertext = btoa(String.fromCharCode(...ciphertextBytes));
-  const iv = btoa(String.fromCharCode(...ivBytes));
-  const authTag = btoa(String.fromCharCode(...tagBytes));
-
-  return { ciphertext, iv, authTag, encryptionVersion: version };
-}
-
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -122,59 +44,65 @@ Deno.serve(async (request) => {
   const url = new URL(request.url);
   const action = url.searchParams.get('action');
 
-  // GET: Fetch safe credential status or dynamic model list (ZERO key material returned)
+  // GET: Fetch safe credential metadata status or dynamic model list (ZERO raw key material returned)
   if (request.method === 'GET') {
     if (action === 'models') {
       const provider = url.searchParams.get('provider');
       if (!provider || !['openai', 'gemini'].includes(provider)) return json({ error: 'Invalid provider.' }, 400);
-      const { data: credential, error: credentialError } = await adminClient
+
+      const { data: credential } = await adminClient
         .from('user_ai_credentials')
-        .select('encrypted_key, iv, auth_tag, encryption_version')
+        .select('api_key, key_last4')
         .eq('user_id', userId)
         .eq('provider', provider)
         .maybeSingle();
 
-      if (credentialError || !credential) return json({ error: `Configure a ${provider} key before loading models.` }, 400);
+      const rawKey = credential?.api_key?.trim();
+      if (!rawKey) return json({ error: `Configure a ${provider} key before loading models.` }, 400);
 
-      let decryptedKey: string | null = null;
       try {
-        const version = credential.encryption_version ?? 1;
-        decryptedKey = await decryptApiKey(credential.encrypted_key, credential.iv, credential.auth_tag, version);
         if (provider === 'openai') {
-          const response = await fetch('https://api.openai.com/v1/models', { headers: { Authorization: `Bearer ${decryptedKey}` } });
+          const response = await fetch('https://api.openai.com/v1/models', {
+            headers: { Authorization: `Bearer ${rawKey}` },
+          });
           if (!response.ok) return json({ error: 'OpenAI model discovery failed.' }, 400);
           const body = await response.json();
-          const models = (body.data || []).map((model: { id?: string }) => model.id).filter(Boolean).sort();
-          return json({ ok: true, models });
+          // Filter to image-capable / vision models
+          const models = (body.data || [])
+            .map((model: { id?: string }) => model.id)
+            .filter((id?: string) => Boolean(id) && (id?.includes('gpt-4') || id?.includes('gpt-3.5') || id?.includes('o1') || id?.includes('o3')))
+            .sort();
+          return json({ ok: true, models: models.length > 0 ? models : ['gpt-4o', 'gpt-4o-mini'] });
         }
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(decryptedKey)}`);
+
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(rawKey)}`);
         if (!response.ok) return json({ error: 'Gemini model discovery failed.' }, 400);
         const body = await response.json();
         const models = (body.models || [])
           .filter((model: { supportedGenerationMethods?: string[] }) => model.supportedGenerationMethods?.includes('generateContent'))
-          .map((model: { name?: string }) => model.name)
+          .map((model: { name?: string }) => (model.name?.startsWith('models/') ? model.name.slice(7) : model.name))
           .filter(Boolean)
           .sort();
-        return json({ ok: true, models });
+        return json({ ok: true, models: models.length > 0 ? models : ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'] });
       } catch {
-        return json({ error: 'Encrypted provider credential could not be decrypted. Save the key again.' }, 400);
-      } finally {
-        decryptedKey = null;
+        return json({ error: 'Failed to contact provider for model catalog.' }, 400);
       }
     }
 
     // Fetch safe metadata status only (no raw key material)
     const { data: rows, error: fetchError } = await adminClient
       .from('user_ai_credentials')
-      .select('provider, updated_at, last_validated_at')
+      .select('provider, key_last4, api_key, updated_at, last_validated_at')
       .eq('user_id', userId);
 
     if (fetchError) return json({ error: 'Could not fetch credential metadata.' }, 500);
 
-    const credentials: Record<string, { connected: boolean; updatedAt: string; lastValidatedAt?: string }> = {};
+    const credentials: Record<string, { connected: boolean; keyLast4?: string; updatedAt: string; lastValidatedAt?: string }> = {};
     for (const row of rows || []) {
+      const last4 = row.key_last4 || (row.api_key ? row.api_key.trim().slice(-4) : undefined);
       credentials[row.provider] = {
         connected: true,
+        keyLast4: last4,
         updatedAt: row.updated_at,
         lastValidatedAt: row.last_validated_at,
       };
@@ -212,15 +140,26 @@ Deno.serve(async (request) => {
       }
 
       if (action === 'test') {
-        const keyToTest = apiKey?.trim();
-        if (!keyToTest) return json({ error: 'API key is required for testing.' }, 400);
+        let keyToTest = apiKey?.trim();
+        if (!keyToTest) {
+          // Look up stored key server-side
+          const { data: cred } = await adminClient
+            .from('user_ai_credentials')
+            .select('api_key')
+            .eq('user_id', userId)
+            .eq('provider', provider)
+            .maybeSingle();
+          keyToTest = cred?.api_key?.trim();
+        }
+
+        if (!keyToTest) return json({ error: 'No API key configured for testing.' }, 400);
 
         const ok = await testProviderKey(provider, keyToTest);
         if (!ok) return json({ error: 'This API key was rejected by ' + provider + '.' }, 400);
         return json({ ok: true, message: 'Provider key is valid.' });
       }
 
-      // Save encrypted key
+      // Save plaintext key server-side
       if (!apiKey || typeof apiKey !== 'string' || !apiKey.trim()) {
         return json({ error: 'API key is required.' }, 400);
       }
@@ -233,7 +172,7 @@ Deno.serve(async (request) => {
         }
       }
 
-      const { ciphertext, iv, authTag, encryptionVersion } = await encryptApiKey(cleanKey, 1);
+      const last4 = cleanKey.slice(-4);
       const now = new Date().toISOString();
 
       const { error: upsertError } = await adminClient
@@ -242,23 +181,22 @@ Deno.serve(async (request) => {
           {
             user_id: userId,
             provider,
-            encrypted_key: ciphertext,
-            iv,
-            auth_tag: authTag,
-            encryption_version: encryptionVersion,
+            api_key: cleanKey,
+            key_last4: last4,
             updated_at: now,
             last_validated_at: now,
           },
           { onConflict: 'user_id,provider' }
         );
 
-      if (upsertError) return json({ error: 'Could not store encrypted credential.' }, 500);
+      if (upsertError) return json({ error: 'Could not store credential.' }, 500);
 
       return json({
         ok: true,
         provider,
         connected: true,
-        message: 'Credential encrypted and saved successfully.',
+        keyLast4: last4,
+        message: 'Credential saved successfully.',
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Processing error.';
@@ -284,3 +222,4 @@ async function testProviderKey(provider: string, apiKey: string): Promise<boolea
     return false;
   }
 }
+

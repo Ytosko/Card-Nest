@@ -330,86 +330,56 @@ Deno.serve(async (request) => {
     }
 
     if (!images || !Array.isArray(images) || images.length === 0) {
-      return json({ ok: false, code: 'AI_IMAGE_PREP_FAILED', message: 'Image base64 payloads are required.' }, 200);
+      console.warn(`[CardNest AI Pipeline] IMAGE_READ_ERROR`, JSON.stringify({ userId, provider, model }));
+      return json({ ok: false, code: 'IMAGE_READ_ERROR', message: "We couldn't process this image. Please try another photo." }, 200);
     }
 
-    // Fetch user's encrypted credentials for this provider
+    // Fetch user's plaintext credentials server-side for this provider
     const { data: credRow, error: credError } = await adminClient
       .from('user_ai_credentials')
-      .select('encrypted_key, iv, auth_tag, encryption_version')
+      .select('api_key, key_last4')
       .eq('user_id', userId)
       .eq('provider', provider)
       .maybeSingle();
+
+    const apiKey = credRow?.api_key?.trim();
 
     console.log(
       `[CardNest AI Pipeline] ai_config_loaded`,
       JSON.stringify({
         userId,
         provider,
-        model_present: Boolean(model),
-        credential_found: Boolean(credRow),
+        selectedModel: model,
+        credentialFound: Boolean(apiKey),
+        keyLast4: credRow?.key_last4 || (apiKey ? apiKey.slice(-4) : undefined),
+        imageCount: images.length,
+        imageReadable: true,
       })
     );
 
-    if (credError || !credRow) {
+    if (credError || !apiKey) {
+      console.warn(`[CardNest AI Pipeline] AI_CREDENTIAL_MISSING`, JSON.stringify({ userId, provider }));
       return json(
         {
           ok: false,
           code: 'AI_CREDENTIAL_MISSING',
-          message: `No encrypted ${provider} key found. Configure your key in Settings > AI.`,
+          message: 'AI extraction is temporarily unavailable.',
+          action: 'open_settings',
         },
         200
       );
     }
 
-    // Decrypt key in memory
-    let decryptedKey: string | null = null;
-    try {
-      const version = credRow.encryption_version ?? 1;
-      const decResult = await decryptApiKey(credRow.encrypted_key, credRow.iv, credRow.auth_tag, version);
-      decryptedKey = decResult.decryptedKey;
-
-      console.log(
-        `[CardNest AI Pipeline] credential_decrypt_success=${Boolean(decryptedKey)}`,
-        JSON.stringify({ provider, model_present: Boolean(model) })
-      );
-
-      // Perform seamless server-side re-encryption if row was stored under legacy format
-      if (decResult.legacyMigrated && decryptedKey) {
-        try {
-          const reEnc = await encryptApiKey(decryptedKey, 1);
-          await adminClient
-            .from('user_ai_credentials')
-            .update({
-              encrypted_key: reEnc.ciphertext,
-              iv: reEnc.iv,
-              auth_tag: reEnc.authTag,
-              encryption_version: 1,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('user_id', userId)
-            .eq('provider', provider);
-        } catch {
-          // Re-encryption failure non-fatal to current extraction
-        }
-      }
-    } catch {
-      console.warn(
-        `[CardNest AI Pipeline] credential_decrypt_failed`,
-        JSON.stringify({ provider })
-      );
-      return json({ ok: false, code: 'AI_DECRYPTION_FAILED', message: 'Could not decrypt provider credential.' }, 200);
-    }
-
     let extractedText: string | null = null;
+    let providerStatus = 0;
 
     try {
-      console.log(`[CardNest AI Pipeline] provider_request_started`, JSON.stringify({ provider, model }));
+      console.log(`[CardNest AI Pipeline] providerRequestStarted`, JSON.stringify({ provider, selectedModel: model }));
 
       if (provider === 'openai') {
         const response = await fetch('https://api.openai.com/v1/chat/completions', {
           method: 'POST',
-          headers: { Authorization: `Bearer ${decryptedKey}`, 'Content-Type': 'application/json' },
+          headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
             model,
             messages: [
@@ -431,23 +401,25 @@ Deno.serve(async (request) => {
           }),
         });
 
+        providerStatus = response.status;
+
         if (!response.ok) {
           const errBody = await response.text();
-          console.warn(`[CardNest AI Pipeline] provider_request_failed`, JSON.stringify({ provider, model, status: response.status }));
-          return json({
-            ok: false,
-            code: classifyProviderError(response.status, errBody),
-            provider: 'openai',
-            providerStatus: response.status,
-            message: response.status === 401 || response.status === 403 ? 'OpenAI rejected this credential. Replace or verify the saved key.' : response.status === 429 ? 'OpenAI rate limit reached. Wait briefly and try again.' : 'OpenAI could not process this card with the selected model.',
-          }, 200);
+          const code = classifyProviderError(response.status, errBody);
+          console.warn(`[CardNest AI Pipeline] providerRequestFailed`, JSON.stringify({ provider, selectedModel: model, providerStatus, finalFailureCode: code }));
+          
+          let message = 'AI extraction is temporarily unavailable.';
+          if (code === 'AI_MODEL_UNSUPPORTED' || code === 'AI_MODEL_UNAVAILABLE') {
+            message = "The selected AI model can't process card images. Choose another model.";
+          }
+          return json({ ok: false, code, provider: 'openai', providerStatus, message }, 200);
         }
         const body = await response.json();
         extractedText = body.choices?.[0]?.message?.content ?? null;
       } else {
         const modelName = model.startsWith('models/') ? model.slice(7) : model;
         const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelName)}:generateContent?key=${encodeURIComponent(decryptedKey)}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelName)}:generateContent?key=${encodeURIComponent(apiKey)}`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -469,34 +441,60 @@ Deno.serve(async (request) => {
           }
         );
 
+        providerStatus = response.status;
+
         if (!response.ok) {
           const errBody = await response.text();
-          console.warn(`[CardNest AI Pipeline] provider_request_failed`, JSON.stringify({ provider, model, status: response.status }));
-          return json({
-            ok: false,
-            code: classifyProviderError(response.status, errBody),
-            provider: 'gemini',
-            providerStatus: response.status,
-            message: response.status === 401 || response.status === 403 ? 'Gemini rejected this credential. Replace or verify the saved key.' : response.status === 429 ? 'Gemini rate limit reached. Wait briefly and try again.' : 'Gemini could not process this card with the selected model.',
-          }, 200);
+          const code = classifyProviderError(response.status, errBody);
+          console.warn(`[CardNest AI Pipeline] providerRequestFailed`, JSON.stringify({ provider, selectedModel: model, providerStatus, finalFailureCode: code }));
+
+          let message = 'AI extraction is temporarily unavailable.';
+          if (code === 'AI_MODEL_UNSUPPORTED' || code === 'AI_MODEL_UNAVAILABLE') {
+            message = "The selected AI model can't process card images. Choose another model.";
+          }
+          return json({ ok: false, code, provider: 'gemini', providerStatus, message }, 200);
         }
         const body = await response.json();
         extractedText = body.candidates?.[0]?.content?.parts?.find((p: { text?: string }) => p.text)?.text ?? null;
       }
-    } finally {
-      // Discard decrypted key reference from memory immediately
-      decryptedKey = null;
+    } catch (netErr) {
+      console.warn(`[CardNest AI Pipeline] AI_NETWORK_ERROR`, JSON.stringify({ provider, selectedModel: model }));
+      return json({ ok: false, code: 'AI_NETWORK_ERROR', message: 'AI extraction is temporarily unavailable.' }, 200);
     }
 
     if (!extractedText) {
-      return json({ ok: false, code: 'AI_RESPONSE_INVALID', message: 'The provider returned empty contact text.' }, 200);
+      console.warn(`[CardNest AI Pipeline] AI_RESPONSE_INVALID`, JSON.stringify({ provider, selectedModel: model, responseSchemaValid: false }));
+      return json({ ok: false, code: 'AI_RESPONSE_INVALID', message: "We couldn't extract the contact details. Please retry." }, 200);
     }
 
     try {
       const parsedJson = JSON.parse(extractedText);
+      const docResult = parsedJson?.documentClassification?.result;
+
+      console.log(
+        `[CardNest AI Pipeline] extractionComplete`,
+        JSON.stringify({
+          provider,
+          selectedModel: model,
+          responseSchemaValid: true,
+          documentClassification: docResult,
+          finalFailureCode: docResult === 'NOT_A_CARD' ? 'NOT_A_CARD' : 'SUCCESS',
+        })
+      );
+
+      if (docResult === 'NOT_A_CARD') {
+        return json({
+          ok: false,
+          code: 'NOT_A_CARD',
+          message: "This doesn't look like a contact card.",
+          result: parsedJson,
+        }, 200);
+      }
+
       return json({ ok: true, result: parsedJson, provider, model });
     } catch {
-      return json({ ok: false, code: 'AI_RESPONSE_INVALID', message: 'Provider output failed JSON parsing.' }, 200);
+      console.warn(`[CardNest AI Pipeline] AI_RESPONSE_INVALID`, JSON.stringify({ provider, selectedModel: model, responseSchemaValid: false }));
+      return json({ ok: false, code: 'AI_RESPONSE_INVALID', message: "We couldn't extract the contact details. Please retry." }, 200);
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Server extraction failed.';

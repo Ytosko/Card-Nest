@@ -40,6 +40,7 @@ export default function AiSettingsScreen() {
   const [provider, setProvider] = useState<AiProvider>('openai');
   const [providerResolved, setProviderResolved] = useState(false);
   const [keySuffix, setKeySuffix] = useState<string | null>(null);
+  const [keyLast4, setKeyLast4] = useState<string | null>(null);
   const [hasServerKey, setHasServerKey] = useState(false);
   const [models, setModels] = useState<AiModelInfo[]>([]);
   const [selectedModel, setSelectedModel] = useState('');
@@ -61,9 +62,9 @@ export default function AiSettingsScreen() {
   const autoSelected = useRef(false);
 
   const maskedKeyDisplay = useMemo(() => {
-    if (!hasServerKey && !keySuffix) return null;
-    return `••••••••${keySuffix || '••••'}`;
-  }, [hasServerKey, keySuffix]);
+    if (!hasServerKey && !keyLast4 && !keySuffix) return null;
+    return `••••••••${keyLast4 || keySuffix || '••••'}`;
+  }, [hasServerKey, keyLast4, keySuffix]);
 
   const selectedModelInfo = useMemo(() => models.find((m) => m.id === selectedModel) ?? null, [models, selectedModel]);
   const selectedModelMissing = useMemo(
@@ -164,6 +165,7 @@ export default function AiSettingsScreen() {
       if (!active) return;
       if (credInfo.state === 'ready') {
         setHasServerKey(true);
+        setKeyLast4(credInfo.keyLast4 || null);
         setKeySuffix(null);
         await loadModels(provider, { currentSelection: savedModel }).catch(() => undefined);
       } else if (credInfo.state === 'network_error') {

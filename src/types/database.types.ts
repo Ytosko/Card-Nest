@@ -519,39 +519,45 @@ export type Database = {
       }
       user_ai_credentials: {
         Row: {
-          auth_tag: string
+          api_key?: string | null
+          auth_tag?: string | null
           created_at: string
-          encrypted_key: string
-          encryption_version: number
+          encrypted_key?: string | null
+          encryption_version?: number | null
           id: string
-          iv: string
-          key_suffix: string
+          iv?: string | null
+          key_last4?: string | null
+          key_suffix?: string | null
           last_validated_at: string | null
           provider: string
           updated_at: string
           user_id: string
         }
         Insert: {
-          auth_tag: string
+          api_key?: string | null
+          auth_tag?: string | null
           created_at?: string
-          encrypted_key: string
-          encryption_version?: number
+          encrypted_key?: string | null
+          encryption_version?: number | null
           id?: string
-          iv: string
-          key_suffix: string
+          iv?: string | null
+          key_last4?: string | null
+          key_suffix?: string | null
           last_validated_at?: string | null
           provider: string
           updated_at?: string
           user_id: string
         }
         Update: {
-          auth_tag?: string
+          api_key?: string | null
+          auth_tag?: string | null
           created_at?: string
-          encrypted_key?: string
-          encryption_version?: number
+          encrypted_key?: string | null
+          encryption_version?: number | null
           id?: string
-          iv?: string
-          key_suffix?: string
+          iv?: string | null
+          key_last4?: string | null
+          key_suffix?: string | null
           last_validated_at?: string | null
           provider?: string
           updated_at?: string

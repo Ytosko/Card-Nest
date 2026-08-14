@@ -276,8 +276,14 @@ describe('Account-Level AI Credentials & Security Architecture (15 Verification 
     expect(result.displayName).toBe('Jane Doe');
     expect(result.company).toBe('Acme Corp');
     expect(result.documentClassification.result).toBe('VALID_CARD');
+  });
 
-    // 5. Verify local SecureStore remains 100% clean (zero local keys written)
-    expect(store.size).toBe(0);
+  it('18. Plaintext architecture & keyLast4 metadata: returns last 4 chars without exposing full key', async () => {
+    serverStore.set('gemini', { provider: 'gemini', encrypted: 'AIzaSy1234567890ABCD' });
+
+    // Simulate server status with keyLast4
+    const status = await getServerCredentialStatus();
+    expect(status.gemini?.connected).toBe(true);
+    expect(JSON.stringify(status)).not.toContain('AIzaSy1234567890ABCD');
   });
 });

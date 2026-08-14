@@ -323,6 +323,7 @@ export type ProviderCredentialState = {
   hasServerCredential: boolean;
   hasLocalCredential: boolean;
   keySuffix: string | null;
+  keyLast4?: string;
   state: 'ready' | 'needs_local_key' | 'not_configured' | 'secure_store_read_error' | 'network_error';
   errorDetails?: {
     name?: string;
@@ -330,15 +331,16 @@ export type ProviderCredentialState = {
   };
 };
 
-export async function getServerCredentialStatus(): Promise<Record<string, { hasKey: boolean; connected: boolean; updatedAt?: string; lastValidatedAt?: string }>> {
+export async function getServerCredentialStatus(): Promise<Record<string, { hasKey: boolean; connected: boolean; keyLast4?: string; updatedAt?: string; lastValidatedAt?: string }>> {
   try {
     const { data, error } = await supabase.functions.invoke('ai-credentials', { method: 'GET' });
     if (!error && data?.ok && data?.credentials) {
-      const result: Record<string, { hasKey: boolean; connected: boolean; updatedAt?: string; lastValidatedAt?: string }> = {};
+      const result: Record<string, { hasKey: boolean; connected: boolean; keyLast4?: string; updatedAt?: string; lastValidatedAt?: string }> = {};
       for (const [p, meta] of Object.entries(data.credentials as Record<string, any>)) {
         result[p] = {
           hasKey: Boolean(meta.connected),
           connected: Boolean(meta.connected),
+          keyLast4: meta.keyLast4,
           updatedAt: meta.updatedAt,
           lastValidatedAt: meta.lastValidatedAt,
         };
@@ -351,15 +353,16 @@ export async function getServerCredentialStatus(): Promise<Record<string, { hasK
 
   const { data: rows, error } = await supabase
     .from('user_ai_credentials')
-    .select('provider, updated_at, last_validated_at');
+    .select('provider, key_last4, updated_at, last_validated_at');
 
-  const result: Record<string, { hasKey: boolean; connected: boolean; updatedAt?: string; lastValidatedAt?: string }> = {};
+  const result: Record<string, { hasKey: boolean; connected: boolean; keyLast4?: string; updatedAt?: string; lastValidatedAt?: string }> = {};
 
   if (!error && rows) {
     for (const row of rows) {
       result[row.provider] = {
         hasKey: true,
         connected: true,
+        keyLast4: row.key_last4 || undefined,
         updatedAt: row.updated_at,
         lastValidatedAt: row.last_validated_at || undefined,
       };
@@ -395,7 +398,7 @@ export async function migrateLocalKeyToServer(provider: AiProvider): Promise<boo
 
 export async function getProviderCredentialState(provider: AiProvider): Promise<ProviderCredentialState> {
   // 1. Check account-level server credentials first
-  let serverStatus: Record<string, { hasKey: boolean; connected: boolean }> = {};
+  let serverStatus: Record<string, { hasKey: boolean; connected: boolean; keyLast4?: string }> = {};
   let networkError = false;
   try {
     serverStatus = await getServerCredentialStatus();
@@ -409,6 +412,7 @@ export async function getProviderCredentialState(provider: AiProvider): Promise<
       hasServerCredential: true,
       hasLocalCredential: false,
       keySuffix: null,
+      keyLast4: provServerStatus.keyLast4,
       state: 'ready',
     };
   }
@@ -418,10 +422,12 @@ export async function getProviderCredentialState(provider: AiProvider): Promise<
   if (localKeyDetails.status === 'ready' || localKeyDetails.status === 'legacy_key_found') {
     const migrated = await migrateLocalKeyToServer(provider);
     if (migrated) {
+      const updatedStatus = await getServerCredentialStatus();
       return {
         hasServerCredential: true,
         hasLocalCredential: false,
         keySuffix: null,
+        keyLast4: updatedStatus[provider]?.keyLast4,
         state: 'ready',
       };
     }
