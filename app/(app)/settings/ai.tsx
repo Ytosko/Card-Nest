@@ -155,9 +155,9 @@ export default function AiSettingsScreen() {
       const { data: pref } = await supabase.from('user_preferences').select('*').eq('user_id', user.id).maybeSingle();
       if (!active) return;
       const savedModel =
-        pref?.selected_ai_provider === provider
-          ? pref?.selected_ai_model || (provider === 'gemini' ? pref?.gemini_selected_model : pref?.openai_selected_model) || ''
-          : '';
+        (provider === 'gemini' ? pref?.gemini_selected_model : pref?.openai_selected_model) ||
+        (pref?.selected_ai_provider === provider ? pref?.selected_ai_model : '') ||
+        '';
       setSelectedModel(savedModel);
 
       const credInfo = await getProviderCredentialState(provider);

@@ -260,4 +260,24 @@ describe('Account-Level AI Credentials & Security Architecture (15 Verification 
     expect(status.openai?.connected).toBeUndefined();
     expect(status.gemini?.connected).toBeUndefined();
   });
+
+  it('17. Core Architecture Guarantee: Account credential exists on server, no device-local key present -> scanning succeeds cleanly', async () => {
+    // 1. Ensure local SecureStore contains ZERO keys
+    store.clear();
+    expect(store.size).toBe(0);
+
+    // 2. Configure account credential on server
+    serverStore.set('gemini', { provider: 'gemini', encrypted: 'encrypted-AIzaSyTestKey' });
+
+    // 3. Perform business card extraction without providing any client-side API key
+    const result = await extractBusinessCard('gemini', 'gemini-2.5-flash', null, ['file:///card_front.jpg']);
+
+    // 4. Verify extraction succeeded cleanly
+    expect(result.displayName).toBe('Jane Doe');
+    expect(result.company).toBe('Acme Corp');
+    expect(result.documentClassification.result).toBe('VALID_CARD');
+
+    // 5. Verify local SecureStore remains 100% clean (zero local keys written)
+    expect(store.size).toBe(0);
+  });
 });
