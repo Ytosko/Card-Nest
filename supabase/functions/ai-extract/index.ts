@@ -13,18 +13,45 @@ function json(body: Record<string, unknown>, status = 200) {
   });
 }
 
-// Master encryption key
-async function getEncryptionKey(): Promise<CryptoKey> {
-  const secret = Deno.env.get('AI_CREDENTIAL_ENCRYPTION_KEY') || Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-  if (!secret || secret.length < 16) throw new Error('AI credential encryption is not configured.');
+// Dedicated master encryption key derived via SHA-256
+async function getEncryptionKey(version = 1): Promise<CryptoKey> {
+  let secret: string | undefined;
+  if (version === 1) {
+    secret = Deno.env.get('AI_CREDENTIAL_ENCRYPTION_KEY');
+  } else if (version === 2) {
+    secret = Deno.env.get('AI_CREDENTIAL_ENCRYPTION_KEY_V2') || Deno.env.get('AI_CREDENTIAL_ENCRYPTION_KEY');
+  }
+
+  if (!secret || secret.trim().length < 16) {
+    throw new Error('AI_ENCRYPTION_KEY_NOT_CONFIGURED');
+  }
+
   const encoder = new TextEncoder();
-  const keyData = encoder.encode(secret.padEnd(32, '!').slice(0, 32));
+  const keyData = await crypto.subtle.digest('SHA-256', encoder.encode(secret));
   return crypto.subtle.importKey('raw', keyData, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
 }
 
-// AES-256-GCM Decryption
-async function decryptApiKey(ciphertextB64: string, ivB64: string, authTagB64: string): Promise<string> {
-  const key = await getEncryptionKey();
+// AES-256-GCM Decryption with tag verification and key versioning
+async function decryptApiKey(
+  ciphertextB64: string,
+  ivB64: string,
+  authTagB64: string,
+  version = 1
+): Promise<string> {
+  let key: CryptoKey;
+  try {
+    key = await getEncryptionKey(version);
+  } catch (keyErr) {
+    if (version === 0) {
+      const legacySecret = Deno.env.get('AI_CREDENTIAL_ENCRYPTION_KEY');
+      if (!legacySecret) throw keyErr;
+      const encoder = new TextEncoder();
+      const keyData = encoder.encode(legacySecret.padEnd(32, '!').slice(0, 32));
+      key = await crypto.subtle.importKey('raw', keyData, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+    } else {
+      throw keyErr;
+    }
+  }
 
   const ciphertextBytes = Uint8Array.from(atob(ciphertextB64), (c) => c.charCodeAt(0));
   const ivBytes = Uint8Array.from(atob(ivB64), (c) => c.charCodeAt(0));
@@ -34,9 +61,13 @@ async function decryptApiKey(ciphertextB64: string, ivB64: string, authTagB64: s
   combinedBuffer.set(ciphertextBytes);
   combinedBuffer.set(authTagBytes, ciphertextBytes.length);
 
-  const decryptedBuffer = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: ivBytes }, key, combinedBuffer);
-  const decoder = new TextDecoder();
-  return decoder.decode(decryptedBuffer);
+  try {
+    const decryptedBuffer = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: ivBytes }, key, combinedBuffer);
+    const decoder = new TextDecoder();
+    return decoder.decode(decryptedBuffer);
+  } catch {
+    throw new Error('AI_DECRYPTION_FAILED');
+  }
 }
 
 // Convert standard JSON schema to Gemini v1beta Schema (Uppercase Types, No additionalProperties)
@@ -258,7 +289,7 @@ Deno.serve(async (request) => {
     // Fetch user's encrypted credentials for this provider
     const { data: credRow, error: credError } = await adminClient
       .from('user_ai_credentials')
-      .select('encrypted_key, iv, auth_tag')
+      .select('encrypted_key, iv, auth_tag, encryption_version')
       .eq('user_id', userId)
       .eq('provider', provider)
       .maybeSingle();
@@ -277,7 +308,8 @@ Deno.serve(async (request) => {
     // Decrypt key in memory
     let decryptedKey: string | null = null;
     try {
-      decryptedKey = await decryptApiKey(credRow.encrypted_key, credRow.iv, credRow.auth_tag);
+      const version = credRow.encryption_version ?? 1;
+      decryptedKey = await decryptApiKey(credRow.encrypted_key, credRow.iv, credRow.auth_tag, version);
     } catch {
       return json({ ok: false, code: 'AI_DECRYPTION_FAILED', message: 'Could not decrypt provider credential.' }, 200);
     }

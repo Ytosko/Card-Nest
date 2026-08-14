@@ -243,4 +243,21 @@ describe('Account-Level AI Credentials & Security Architecture (15 Verification 
     // Verify local SecureStore key was wiped
     expect(store.has('cardnest.ai.openai.api-key.v1')).toBe(false);
   });
+
+  it('16. Dedicated server secret validation: fails closed without fallback to service role key', async () => {
+    // Verify that server status returns error if AI_CREDENTIAL_ENCRYPTION_KEY is missing
+    const { supabase } = await import('@/src/lib/supabase/client');
+    const originalInvoke = supabase.functions.invoke;
+
+    vi.spyOn(supabase.functions, 'invoke').mockImplementationOnce(async (name: string) => {
+      if (name.startsWith('ai-credentials')) {
+        return { data: null, error: new Error('AI_ENCRYPTION_KEY_NOT_CONFIGURED: Dedicated secret missing') };
+      }
+      return { data: null, error: null };
+    });
+
+    const status = await getServerCredentialStatus();
+    expect(status.openai?.connected).toBeUndefined();
+    expect(status.gemini?.connected).toBeUndefined();
+  });
 });

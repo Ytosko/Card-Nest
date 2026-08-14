@@ -13,29 +13,66 @@ function json(body: Record<string, unknown>, status = 200) {
   });
 }
 
-// Encryption key derived from server-only secret
-async function getEncryptionKey(): Promise<CryptoKey> {
-  const secret = Deno.env.get('AI_CREDENTIAL_ENCRYPTION_KEY') || Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-  if (!secret || secret.length < 16) throw new Error('AI credential encryption is not configured on server.');
+// Dedicated encryption key derived from AI_CREDENTIAL_ENCRYPTION_KEY via SHA-256
+async function getEncryptionKey(version = 1): Promise<CryptoKey> {
+  let secret: string | undefined;
+  if (version === 1) {
+    secret = Deno.env.get('AI_CREDENTIAL_ENCRYPTION_KEY');
+  } else if (version === 2) {
+    secret = Deno.env.get('AI_CREDENTIAL_ENCRYPTION_KEY_V2') || Deno.env.get('AI_CREDENTIAL_ENCRYPTION_KEY');
+  }
+
+  if (!secret || secret.trim().length < 16) {
+    throw new Error('AI_ENCRYPTION_KEY_NOT_CONFIGURED');
+  }
+
   const encoder = new TextEncoder();
-  const keyData = encoder.encode(secret.padEnd(32, '!').slice(0, 32));
+  const keyData = await crypto.subtle.digest('SHA-256', encoder.encode(secret));
   return crypto.subtle.importKey('raw', keyData, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
 }
 
-export async function decryptApiKey(ciphertextB64: string, ivB64: string, authTagB64: string): Promise<string> {
-  const key = await getEncryptionKey();
+export async function decryptApiKey(
+  ciphertextB64: string,
+  ivB64: string,
+  authTagB64: string,
+  version = 1
+): Promise<string> {
+  let key: CryptoKey;
+  try {
+    key = await getEncryptionKey(version);
+  } catch (keyErr) {
+    if (version === 0) {
+      const legacySecret = Deno.env.get('AI_CREDENTIAL_ENCRYPTION_KEY');
+      if (!legacySecret) throw keyErr;
+      const encoder = new TextEncoder();
+      const keyData = encoder.encode(legacySecret.padEnd(32, '!').slice(0, 32));
+      key = await crypto.subtle.importKey('raw', keyData, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+    } else {
+      throw keyErr;
+    }
+  }
+
   const ciphertext = Uint8Array.from(atob(ciphertextB64), (char) => char.charCodeAt(0));
   const iv = Uint8Array.from(atob(ivB64), (char) => char.charCodeAt(0));
   const authTag = Uint8Array.from(atob(authTagB64), (char) => char.charCodeAt(0));
+
   const combined = new Uint8Array(ciphertext.length + authTag.length);
   combined.set(ciphertext);
   combined.set(authTag, ciphertext.length);
-  const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, combined);
-  return new TextDecoder().decode(decrypted);
+
+  try {
+    const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, combined);
+    return new TextDecoder().decode(decrypted);
+  } catch {
+    throw new Error('AI_DECRYPTION_FAILED');
+  }
 }
 
-async function encryptApiKey(plaintext: string): Promise<{ ciphertext: string; iv: string; authTag: string }> {
-  const key = await getEncryptionKey();
+async function encryptApiKey(
+  plaintext: string,
+  version = 1
+): Promise<{ ciphertext: string; iv: string; authTag: string; encryptionVersion: number }> {
+  const key = await getEncryptionKey(version);
   const ivBytes = crypto.getRandomValues(new Uint8Array(12));
   const encoder = new TextEncoder();
   const encodedText = encoder.encode(plaintext);
@@ -51,7 +88,7 @@ async function encryptApiKey(plaintext: string): Promise<{ ciphertext: string; i
   const iv = btoa(String.fromCharCode(...ivBytes));
   const authTag = btoa(String.fromCharCode(...tagBytes));
 
-  return { ciphertext, iv, authTag };
+  return { ciphertext, iv, authTag, encryptionVersion: version };
 }
 
 Deno.serve(async (request) => {
@@ -92,7 +129,7 @@ Deno.serve(async (request) => {
       if (!provider || !['openai', 'gemini'].includes(provider)) return json({ error: 'Invalid provider.' }, 400);
       const { data: credential, error: credentialError } = await adminClient
         .from('user_ai_credentials')
-        .select('encrypted_key, iv, auth_tag')
+        .select('encrypted_key, iv, auth_tag, encryption_version')
         .eq('user_id', userId)
         .eq('provider', provider)
         .maybeSingle();
@@ -101,7 +138,8 @@ Deno.serve(async (request) => {
 
       let decryptedKey: string | null = null;
       try {
-        decryptedKey = await decryptApiKey(credential.encrypted_key, credential.iv, credential.auth_tag);
+        const version = credential.encryption_version ?? 1;
+        decryptedKey = await decryptApiKey(credential.encrypted_key, credential.iv, credential.auth_tag, version);
         if (provider === 'openai') {
           const response = await fetch('https://api.openai.com/v1/models', { headers: { Authorization: `Bearer ${decryptedKey}` } });
           if (!response.ok) return json({ error: 'OpenAI model discovery failed.' }, 400);
@@ -195,7 +233,7 @@ Deno.serve(async (request) => {
         }
       }
 
-      const { ciphertext, iv, authTag } = await encryptApiKey(cleanKey);
+      const { ciphertext, iv, authTag, encryptionVersion } = await encryptApiKey(cleanKey, 1);
       const now = new Date().toISOString();
 
       const { error: upsertError } = await adminClient
@@ -207,6 +245,7 @@ Deno.serve(async (request) => {
             encrypted_key: ciphertext,
             iv,
             auth_tag: authTag,
+            encryption_version: encryptionVersion,
             updated_at: now,
             last_validated_at: now,
           },

@@ -522,6 +522,7 @@ export type Database = {
           auth_tag: string
           created_at: string
           encrypted_key: string
+          encryption_version: number
           id: string
           iv: string
           key_suffix: string
@@ -534,6 +535,7 @@ export type Database = {
           auth_tag: string
           created_at?: string
           encrypted_key: string
+          encryption_version?: number
           id?: string
           iv: string
           key_suffix: string
@@ -546,6 +548,7 @@ export type Database = {
           auth_tag?: string
           created_at?: string
           encrypted_key?: string
+          encryption_version?: number
           id?: string
           iv?: string
           key_suffix?: string
